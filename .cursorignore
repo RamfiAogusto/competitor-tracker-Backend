@@ -1,0 +1,25 @@
+# Cursor ignore file
+# Este archivo especifica qué archivos Cursor debe ignorar
+
+# Permitir acceso al archivo .env
+!.env
+
+# Ignorar otros archivos sensibles si es necesario
+# .env.local
+# .env.production
+# .env.staging
+
+# Node modules (ya ignorado por defecto)
+# node_modules/
+
+# Logs
+logs/
+*.log
+
+# Build outputs
+build/
+dist/
+
+# OS generated files
+.DS_Store
+Thumbs.db

@@ -15,6 +15,7 @@ const config = require('./config')
 const logger = require('./utils/logger')
 const errorHandler = require('./middleware/errorHandler')
 const notFoundHandler = require('./middleware/notFoundHandler')
+const { testConnection, syncModels } = require('./database/config')
 
 // Rutas
 const apiRoutes = require('./routes')
@@ -147,12 +148,28 @@ class App {
    */
   async start () {
     try {
+      // Probar conexión a base de datos
+      logger.info('🔌 Probando conexión a base de datos...')
+      const dbConnected = await testConnection()
+      
+      if (!dbConnected) {
+        logger.error('❌ No se pudo conectar a la base de datos')
+        process.exit(1)
+      }
+
+      // Sincronizar modelos en desarrollo
+      if (config.nodeEnv === 'development') {
+        logger.info('🔄 Sincronizando modelos de base de datos...')
+        await syncModels()
+      }
+
       const port = config.server.port
       const server = this.app.listen(port, () => {
         logger.info(`🚀 Servidor iniciado en puerto ${port}`)
         logger.info(`🌍 Entorno: ${config.nodeEnv}`)
         logger.info(`📊 Health check: http://localhost:${port}/health`)
         logger.info(`🔗 API: http://localhost:${port}/api`)
+        logger.info(`🗄️ Base de datos: ${config.database.name} en ${config.database.host}:${config.database.port}`)
       })
 
       // Graceful shutdown

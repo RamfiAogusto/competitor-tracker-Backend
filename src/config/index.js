@@ -8,7 +8,7 @@ require('dotenv').config()
 const config = {
   // Configuración del servidor
   server: {
-    port: parseInt(process.env.PORT, 10) || 3001,
+    port: parseInt(process.env.PORT, 10) || 3002,
     host: process.env.HOST || '0.0.0.0'
   },
 
@@ -20,9 +20,9 @@ const config = {
   database: {
     host: process.env.DB_HOST || 'localhost',
     port: parseInt(process.env.DB_PORT, 10) || 5432,
-    name: process.env.DB_NAME || 'competitor_tracker',
+    name: process.env.DB_NAME || 'Tracker',
     username: process.env.DB_USER || 'postgres',
-    password: process.env.DB_PASSWORD || '',
+    password: process.env.DB_PASSWORD || '2004',
     dialect: process.env.DB_DIALECT || 'postgres',
     logging: process.env.DB_LOGGING === 'true' || false,
     pool: {
