@@ -60,8 +60,8 @@ transports.push(
     filename: config.logging.file,
     level: config.logging.level,
     format: logFormat,
-    maxsize: this.parseSize(config.logging.maxSize),
-    maxFiles: this.parseTime(config.logging.maxFiles)
+    maxsize: parseSize(config.logging.maxSize),
+    maxFiles: parseTime(config.logging.maxFiles)
   })
 )
 
@@ -71,8 +71,8 @@ transports.push(
     filename: path.join(logDir, 'error.log'),
     level: 'error',
     format: logFormat,
-    maxsize: this.parseSize(config.logging.maxSize),
-    maxFiles: this.parseTime(config.logging.maxFiles)
+    maxsize: parseSize(config.logging.maxSize),
+    maxFiles: parseTime(config.logging.maxFiles)
   })
 )
 
