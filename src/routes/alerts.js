@@ -45,10 +45,6 @@ router.get('/', asyncHandler(async (req, res) => {
       offset
     })
 
-    // Debug: Log first alert structure
-    if (result.alerts.length > 0) {
-      console.log('First alert structure:', JSON.stringify(result.alerts[0], null, 2))
-    }
 
     res.json({
       success: true,
