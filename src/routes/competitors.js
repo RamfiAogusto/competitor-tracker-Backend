@@ -253,11 +253,17 @@ router.post('/', validateCompetitor.create, asyncHandler(async (req, res) => {
   })
 
   try {
+    // Normalizar la URL para asegurar que tenga protocolo
+    let normalizedUrl = url.trim()
+    if (!normalizedUrl.startsWith('http://') && !normalizedUrl.startsWith('https://')) {
+      normalizedUrl = `https://${normalizedUrl}`
+    }
+
     // Verificar que la URL no esté duplicada para este usuario (solo activos)
     const existingCompetitor = await Competitor.findOne({
       where: {
         userId: req.user.id,
-        url: url,
+        url: normalizedUrl,
         isActive: true
       }
     })
@@ -275,7 +281,7 @@ router.post('/', validateCompetitor.create, asyncHandler(async (req, res) => {
     const newCompetitor = await Competitor.create({
       userId: req.user.id,
       name,
-      url,
+      url: normalizedUrl,
       description,
       monitoringEnabled,
       checkInterval
@@ -350,12 +356,19 @@ router.put('/:id', validateCompetitor.update, asyncHandler(async (req, res) => {
       })
     }
 
-    // Si se está actualizando la URL, verificar que no esté duplicada
+    // Si se está actualizando la URL, normalizar y verificar que no esté duplicada
     if (updateData.url && updateData.url !== competitor.url) {
+      // Normalizar la URL para asegurar que tenga protocolo
+      let normalizedUrl = updateData.url.trim()
+      if (!normalizedUrl.startsWith('http://') && !normalizedUrl.startsWith('https://')) {
+        normalizedUrl = `https://${normalizedUrl}`
+      }
+      updateData.url = normalizedUrl
+
       const existingCompetitor = await Competitor.findOne({
         where: {
           userId: req.user.id,
-          url: updateData.url,
+          url: normalizedUrl,
           isActive: true,
           id: { [require('sequelize').Op.ne]: id }
         }
