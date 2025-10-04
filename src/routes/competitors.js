@@ -414,15 +414,46 @@ router.put('/:id', validateCompetitor.update, asyncHandler(async (req, res) => {
 
     // Obtener el competidor actualizado
     const updatedCompetitor = await Competitor.findByPk(id, {
-      attributes: {
-        exclude: ['userId']
-      }
+      attributes: [
+        'id', 'name', 'url', 'description', 'monitoringEnabled', 'checkInterval', 
+        'priority', 'lastCheckedAt', 'totalVersions', 'lastChangeAt', 'isActive', 
+        'created_at', 'updated_at'
+      ],
+      include: [
+        {
+          model: Snapshot,
+          as: 'lastSnapshot',
+          required: false,
+          where: {
+            isCurrent: true
+          },
+          attributes: ['id', 'versionNumber', 'changeCount', 'severity', 'created_at']
+        }
+      ]
     })
+
+    // Transformar datos para incluir información de severidad
+    const competitorData = updatedCompetitor.toJSON()
+    
+    // Agregar severidad del último cambio
+    if (competitorData.lastSnapshot && competitorData.lastSnapshot.length > 0) {
+      const lastSnapshot = competitorData.lastSnapshot[0]
+      competitorData.severity = lastSnapshot.severity
+      competitorData.changeCount = lastSnapshot.changeCount
+      competitorData.lastChangeAt = lastSnapshot.created_at
+    } else {
+      competitorData.severity = 'low'
+      competitorData.changeCount = 0
+      competitorData.lastChangeAt = null
+    }
+
+    // Remover el array de snapshots de la respuesta
+    delete competitorData.lastSnapshot
 
     res.json({
       success: true,
       message: 'Competidor actualizado exitosamente',
-      data: updatedCompetitor
+      data: competitorData
     })
   } catch (error) {
     logger.error('Error al actualizar competidor:', error)

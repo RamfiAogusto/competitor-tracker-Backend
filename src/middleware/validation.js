@@ -101,6 +101,11 @@ const validateCompetitor = {
       .isInt({ min: 300, max: 86400 })
       .withMessage('El intervalo de verificación debe estar entre 300 y 86400 segundos'),
     
+    body('priority')
+      .optional()
+      .isIn(['low', 'medium', 'high'])
+      .withMessage('La prioridad debe ser low, medium o high'),
+    
     handleValidationErrors
   ],
 
