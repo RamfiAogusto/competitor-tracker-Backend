@@ -120,16 +120,28 @@ class HeadlessXService {
    */
   async extractHTML (url, options = {}) {
     try {
-      const payload = {
+      const params = {
         url,
-        waitFor: options.waitFor || 0,
-        viewport: options.viewport || { width: 1920, height: 1080 },
-        selector: options.selector,
-        removeScripts: options.removeScripts || true
+        waitFor: options.waitFor || 3000,
+        removeScripts: options.removeScripts !== false ? 'true' : 'false'
       }
 
-      const response = await this.client.post('/api/html', payload)
-      return response.data
+      // Usar GET en lugar de POST (HeadlessX funciona mejor con GET)
+      const response = await this.client.get('/api/html', { params })
+      
+      // HeadlessX devuelve el HTML directamente como string en response.data
+      // También incluye metadatos en los headers
+      const html = response.data
+      const title = response.headers['x-page-title'] || 'Extracted HTML'
+      const renderedUrl = response.headers['x-rendered-url'] || url
+      
+      return {
+        html: html,
+        title: title,
+        url: renderedUrl,
+        contentLength: response.headers['x-content-length'],
+        wasTimeout: response.headers['x-was-timeout'] === 'true'
+      }
     } catch (error) {
       throw this.handleError(error, 'Error extrayendo HTML')
     }

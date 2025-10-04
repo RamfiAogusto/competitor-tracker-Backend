@@ -212,7 +212,7 @@ class ChangeDetector {
         fullPage: options.fullPage !== false
       })
 
-      return result.html || result
+      return result.html
     } catch (error) {
       logger.error(`Error obteniendo HTML de ${url}:`, error)
       
