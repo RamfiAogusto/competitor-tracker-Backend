@@ -47,8 +47,8 @@ router.get('/', validateCompetitor.list, asyncHandler(async (req, res) => {
     }
 
     // Validar campos de ordenamiento
-    const allowedSortFields = ['name', 'url', 'createdAt', 'updatedAt', 'lastCheckedAt', 'totalVersions']
-    const sortField = allowedSortFields.includes(sortBy) ? sortBy : 'createdAt'
+    const allowedSortFields = ['name', 'url', 'created_at', 'updated_at', 'last_checked_at', 'total_versions']
+    const sortField = allowedSortFields.includes(sortBy) ? sortBy : 'created_at'
     const sortDirection = sortOrder.toUpperCase() === 'ASC' ? 'ASC' : 'DESC'
 
     // Ejecutar consulta con paginación
@@ -417,8 +417,8 @@ router.get('/:id/history', validateCompetitor.list, asyncHandler(async (req, res
         'changePercentage',
         'severity',
         'changeSummary',
-        'createdAt',
-        'updatedAt'
+        'created_at',
+        'updated_at'
       ]
     })
 
