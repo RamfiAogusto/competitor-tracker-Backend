@@ -57,9 +57,11 @@ router.get('/', validateCompetitor.list, asyncHandler(async (req, res) => {
       limit: limitNum,
       offset: offset,
       order: [[sortField, sortDirection]],
-      attributes: {
-        exclude: ['userId'] // No exponer userId en la respuesta
-      },
+      attributes: [
+        'id', 'name', 'url', 'description', 'monitoringEnabled', 'checkInterval', 
+        'priority', 'lastCheckedAt', 'totalVersions', 'lastChangeAt', 'isActive', 
+        'created_at', 'updated_at'
+      ],
       include: [
         {
           model: Snapshot,
@@ -143,7 +145,28 @@ router.get('/overview', asyncHandler(async (req, res) => {
 
     const pausedMonitoring = totalCompetitors - activeMonitoring
 
-    // Obtener estadísticas de severidad
+    // Obtener estadísticas de prioridad
+    const priorityStats = await Competitor.findAll({
+      where: {
+        userId: req.user.id,
+        isActive: true
+      },
+      attributes: ['id', 'priority']
+    })
+
+    // Contar por prioridad
+    const priorityCounts = {
+      high: 0,
+      medium: 0,
+      low: 0
+    }
+
+    priorityStats.forEach(competitor => {
+      const priority = competitor.priority || 'medium'
+      priorityCounts[priority] = (priorityCounts[priority] || 0) + 1
+    })
+
+    // Obtener estadísticas de severidad para cambios
     const severityStats = await Competitor.findAll({
       where: {
         userId: req.user.id,
@@ -163,7 +186,7 @@ router.get('/overview', asyncHandler(async (req, res) => {
       attributes: ['id']
     })
 
-    // Contar por severidad
+    // Contar por severidad de cambios
     const severityCounts = {
       critical: 0,
       high: 0,
@@ -186,8 +209,9 @@ router.get('/overview', asyncHandler(async (req, res) => {
         total: totalCompetitors,
         active: activeMonitoring,
         paused: pausedMonitoring,
-        highPriority: severityCounts.high + severityCounts.critical,
+        highPriority: priorityCounts.high,
         avgCheckTime: avgCheckTime,
+        priority: priorityCounts,
         severity: severityCounts
       }
     })
@@ -244,12 +268,14 @@ router.get('/:id', validateCompetitor.getById, asyncHandler(async (req, res) => 
  * Crear un nuevo competidor
  */
 router.post('/', validateCompetitor.create, asyncHandler(async (req, res) => {
-  const { name, url, description, monitoringEnabled = true, checkInterval = 3600 } = req.body
+  const { name, url, description, monitoringEnabled = true, checkInterval = 3600, priority } = req.body
 
   logger.info('Creando competidor', {
     userId: req.user.id,
     name,
-    url
+    url,
+    priority,
+    fullBody: req.body
   })
 
   try {
@@ -284,17 +310,18 @@ router.post('/', validateCompetitor.create, asyncHandler(async (req, res) => {
       url: normalizedUrl,
       description,
       monitoringEnabled,
-      checkInterval
+      checkInterval,
+      priority: priority || 'medium'
     })
 
     // Remover userId de la respuesta
-    const competitorData = newCompetitor.toJSON()
-    delete competitorData.userId
+    const responseData = newCompetitor.toJSON()
+    delete responseData.userId
 
     res.status(201).json({
       success: true,
       message: 'Competidor creado exitosamente',
-      data: competitorData
+      data: responseData
     })
   } catch (error) {
     logger.error('Error al crear competidor:', error)

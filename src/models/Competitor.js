@@ -55,6 +55,10 @@ const Competitor = sequelize.define('Competitor', {
     },
     field: 'check_interval'
   },
+  priority: {
+    type: DataTypes.ENUM('low', 'medium', 'high'),
+    field: 'priority'
+  },
   lastCheckedAt: {
     type: DataTypes.DATE,
     field: 'last_checked_at'
