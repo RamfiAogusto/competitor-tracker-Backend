@@ -1085,13 +1085,12 @@ router.post('/:id/disable-monitoring', validateCompetitor.getById, asyncHandler(
  */
 router.post('/:id/manual-check', validateCompetitor.getById, asyncHandler(async (req, res) => {
   const { id } = req.params
-  const { simulate = true, htmlVersion = 'v2' } = req.body
+  const { simulate = false } = req.body
 
   logger.info('Ejecutando monitoreo manual', {
     userId: req.user.id,
     competitorId: id,
-    simulate,
-    htmlVersion
+    simulate
   })
 
   try {
@@ -1114,7 +1113,6 @@ router.post('/:id/manual-check', validateCompetitor.getById, asyncHandler(async 
     // Ejecutar captura manual
     const result = await changeDetector.captureChange(competitor.id, competitor.url, {
       simulate,
-      htmlVersion,
       isManualCheck: true
     })
 
