@@ -5,9 +5,14 @@
 
 const express = require('express')
 const router = express.Router()
+const { authenticateToken } = require('../middleware/auth')
 const { asyncHandler } = require('../middleware/errorHandler')
 const { validateAlert } = require('../middleware/validation')
+const alertService = require('../services/alertService')
 const logger = require('../utils/logger')
+
+// Aplicar autenticación a todas las rutas
+router.use(authenticateToken)
 
 /**
  * GET /api/alerts
@@ -29,49 +34,31 @@ router.get('/', asyncHandler(async (req, res) => {
     pagination: { page, limit }
   })
 
-  // TODO: Implementar consulta a base de datos con filtros
-  const alerts = {
-    data: [
-      {
-        id: '550e8400-e29b-41d4-a716-446655440001',
-        type: 'content_change',
-        severity: 'high',
-        status: 'unread',
-        message: 'Se detectaron cambios significativos en la página de precios',
-        competitorId: '550e8400-e29b-41d4-a716-446655440000',
-        competitorName: 'TechCorp',
-        versionNumber: 15,
-        changePercentage: 12.5,
-        createdAt: new Date().toISOString(),
-        readAt: null
-      },
-      {
-        id: '550e8400-e29b-41d4-a716-446655440002',
-        type: 'new_page',
-        severity: 'medium',
-        status: 'read',
-        message: 'Se detectó una nueva página en el sitio',
-        competitorId: '550e8400-e29b-41d4-a716-446655440000',
-        competitorName: 'TechCorp',
-        versionNumber: 14,
-        changePercentage: 8.2,
-        createdAt: new Date(Date.now() - 86400000).toISOString(),
-        readAt: new Date(Date.now() - 43200000).toISOString()
-      }
-    ],
-    pagination: {
-      page: parseInt(page),
+  try {
+    const offset = (parseInt(page) - 1) * parseInt(limit)
+    const result = await alertService.getUserAlerts(req.user.id, {
+      status,
+      severity,
+      type,
+      competitorId,
       limit: parseInt(limit),
-      total: 25,
-      totalPages: 2
-    }
-  }
+      offset
+    })
 
-  res.json({
-    success: true,
-    data: alerts.data,
-    pagination: alerts.pagination
-  })
+    res.json({
+      success: true,
+      data: result.alerts,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total: result.total,
+        totalPages: Math.ceil(result.total / parseInt(limit))
+      }
+    })
+  } catch (error) {
+    logger.error('Error obteniendo alertas:', error)
+    throw error
+  }
 }))
 
 /**
@@ -86,34 +73,24 @@ router.get('/stats', asyncHandler(async (req, res) => {
     period
   })
 
-  // TODO: Implementar consulta de estadísticas
-  const stats = {
-    period,
-    total: {
-      alerts: 45,
-      unread: 8,
-      critical: 3,
-      high: 12,
-      medium: 20,
-      low: 10
-    },
-    byType: {
-      content_change: 25,
-      price_change: 8,
-      new_page: 5,
-      page_removed: 2,
-      error: 5
-    },
-    trends: {
+  try {
+    const stats = await alertService.getAlertStats(req.user.id)
+    
+    // Agregar datos de tendencias (placeholder por ahora)
+    stats.trends = {
       alertsPerDay: [3, 5, 2, 8, 6, 4, 7],
       criticalPerDay: [0, 1, 0, 2, 1, 0, 1]
     }
-  }
+    stats.period = period
 
-  res.json({
-    success: true,
-    data: stats
-  })
+    res.json({
+      success: true,
+      data: stats
+    })
+  } catch (error) {
+    logger.error('Error obteniendo estadísticas de alertas:', error)
+    throw error
+  }
 }))
 
 /**
@@ -169,19 +146,26 @@ router.put('/:id', validateAlert.update, asyncHandler(async (req, res) => {
     newStatus: status
   })
 
-  // TODO: Implementar actualización en base de datos
-  const updatedAlert = {
-    id,
-    status,
-    updatedAt: new Date().toISOString(),
-    readAt: status === 'read' ? new Date().toISOString() : null
-  }
+  try {
+    let updatedAlert
 
-  res.json({
-    success: true,
-    message: 'Alerta actualizada exitosamente',
-    data: updatedAlert
-  })
+    if (status === 'read') {
+      updatedAlert = await alertService.markAsRead(id, req.user.id)
+    } else if (status === 'archived') {
+      updatedAlert = await alertService.archiveAlert(id, req.user.id)
+    } else {
+      throw new Error('Status no válido')
+    }
+
+    res.json({
+      success: true,
+      message: 'Alerta actualizada exitosamente',
+      data: updatedAlert
+    })
+  } catch (error) {
+    logger.error('Error actualizando alerta:', error)
+    throw error
+  }
 }))
 
 /**

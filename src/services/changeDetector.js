@@ -9,6 +9,7 @@ const { promisify } = require('util')
 const config = require('../config')
 const logger = require('../utils/logger')
 const headlessXService = require('./headlessXService')
+const alertService = require('./alertService')
 const { AppError } = require('../middleware/errorHandler')
 
 const gzip = promisify(zlib.gzip)
@@ -58,7 +59,10 @@ class ChangeDetector {
       // 5. Guardar diferencias
       await this.saveDifferences(lastSnapshot.id, newVersion.id, comparison)
       
-      // 6. Limpiar versiones antiguas si es necesario
+      // 6. Crear alerta automática
+      await this.createChangeAlert(competitorId, newVersion, comparison)
+      
+      // 7. Limpiar versiones antiguas si es necesario
       await this.cleanupOldVersions(competitorId)
       
       return newVersion
@@ -428,6 +432,45 @@ class ChangeDetector {
    */
   generateId () {
     return require('crypto').randomUUID()
+  }
+
+  /**
+   * Crear alerta automática cuando se detectan cambios
+   */
+  async createChangeAlert (competitorId, newVersion, comparison) {
+    try {
+      // Obtener información del competidor para el userId
+      const { Competitor } = require('../models')
+      const competitor = await Competitor.findByPk(competitorId, {
+        attributes: ['userId']
+      })
+
+      if (!competitor) {
+        logger.warn(`No se pudo encontrar competidor ${competitorId} para crear alerta`)
+        return
+      }
+
+      // Crear alerta usando el servicio de alertas
+      await alertService.createChangeAlert({
+        userId: competitor.userId,
+        competitorId,
+        snapshotId: newVersion.id,
+        changeCount: comparison.changeCount,
+        changePercentage: comparison.changePercentage,
+        severity: comparison.severity,
+        versionNumber: newVersion.version_number,
+        changeSummary: this.generateChangeSummary(comparison.changes),
+        affectedSections: this.extractAffectedSections(comparison.changes)
+      })
+
+      logger.info(`Alerta creada para competidor ${competitorId}`, {
+        severity: comparison.severity,
+        changeCount: comparison.changeCount
+      })
+    } catch (error) {
+      logger.error('Error creando alerta de cambio:', error)
+      // No lanzar error para no interrumpir el flujo principal
+    }
   }
 
   /**

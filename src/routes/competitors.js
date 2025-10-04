@@ -5,11 +5,15 @@
 
 const express = require('express')
 const router = express.Router()
+const { authenticateToken } = require('../middleware/auth')
 const { asyncHandler } = require('../middleware/errorHandler')
 const { validateCompetitor } = require('../middleware/validation')
 const changeDetector = require('../services/changeDetector')
 const logger = require('../utils/logger')
 const { Competitor, Snapshot } = require('../models')
+
+// Aplicar autenticación a todas las rutas
+router.use(authenticateToken)
 
 /**
  * GET /api/competitors
@@ -561,6 +565,41 @@ router.post('/:id/capture', validateCompetitor.getById, asyncHandler(async (req,
       
       const versionNumber = lastSnapshot ? lastSnapshot.versionNumber + 1 : 1
       
+      // Calcular cambios reales comparando con la versión anterior
+      let changeCount = 0
+      let changePercentage = 0
+      let severity = 'low'
+      let changeSummary = 'Captura inicial'
+      
+      if (versionNumber > 1 && lastSnapshot) {
+        // Simular detección de cambios basada en diferencias de HTML
+        const previousHtml = lastSnapshot.fullHtml || ''
+        const currentHtml = options.html
+        
+        // Contar líneas diferentes (simulación simple)
+        const prevLines = previousHtml.split('\n').length
+        const currLines = currentHtml.split('\n').length
+        const lineDiff = Math.abs(prevLines - currLines)
+        
+        // Calcular métricas de cambio
+        changeCount = Math.max(1, Math.floor(lineDiff / 5)) // Mínimo 1 cambio
+        const maxLines = Math.max(prevLines, currLines)
+        changePercentage = maxLines > 0 ? Math.min(100, (lineDiff / maxLines) * 100) : 0
+        
+        // Determinar severidad basada en el porcentaje de cambio
+        if (changePercentage > 20 || changeCount > 10) {
+          severity = 'critical'
+        } else if (changePercentage > 10 || changeCount > 5) {
+          severity = 'high'
+        } else if (changePercentage > 5 || changeCount > 2) {
+          severity = 'medium'
+        } else {
+          severity = 'low'
+        }
+        
+        changeSummary = `${changeCount} cambios detectados (${changePercentage.toFixed(1)}% del contenido)`
+      }
+      
       // Crear nuevo snapshot
       const newSnapshot = await Snapshot.create({
         competitorId: id,
@@ -568,10 +607,10 @@ router.post('/:id/capture', validateCompetitor.getById, asyncHandler(async (req,
         fullHtml: options.html,
         isFullVersion: true,
         isCurrent: true,
-        changeCount: versionNumber === 1 ? 0 : Math.floor(Math.random() * 10) + 1,
-        changePercentage: versionNumber === 1 ? 0 : Math.random() * 100,
-        severity: versionNumber === 1 ? 'low' : ['low', 'medium', 'high', 'critical'][Math.floor(Math.random() * 4)],
-        changeSummary: versionNumber === 1 ? 'Captura inicial' : `Cambios detectados en versión ${versionNumber}`
+        changeCount: changeCount,
+        changePercentage: changePercentage,
+        severity: severity,
+        changeSummary: changeSummary
       })
       
       // Marcar versiones anteriores como no actuales
@@ -591,6 +630,53 @@ router.post('/:id/capture', validateCompetitor.getById, asyncHandler(async (req,
         },
         { where: { id: id } }
       )
+      
+      // Crear alerta si hay cambios significativos (solo para versiones > 1)
+      logger.info('Verificando condiciones para crear alerta', {
+        versionNumber,
+        changeCount: newSnapshot.changeCount,
+        shouldCreateAlert: versionNumber > 1 && newSnapshot.changeCount > 0
+      })
+      
+      if (versionNumber > 1 && newSnapshot.changeCount > 0) {
+        try {
+          logger.info('Creando alerta para simulación', {
+            userId: req.user.id,
+            competitorId: id,
+            changeCount: newSnapshot.changeCount,
+            severity: newSnapshot.severity
+          })
+          
+          const alertService = require('../services/alertService')
+          const alert = await alertService.createChangeAlert({
+            userId: req.user.id,
+            competitorId: id,
+            snapshotId: newSnapshot.id,
+            changeCount: newSnapshot.changeCount,
+            changePercentage: newSnapshot.changePercentage,
+            severity: newSnapshot.severity,
+            versionNumber: newSnapshot.versionNumber,
+            changeSummary: `Simulación: ${newSnapshot.changeCount} cambios detectados`,
+            affectedSections: ['content', 'navigation']
+          })
+          
+          logger.info('Alerta creada exitosamente', {
+            alertId: alert.id,
+            competitorId: id,
+            severity: newSnapshot.severity,
+            changeCount: newSnapshot.changeCount
+          })
+        } catch (alertError) {
+          logger.error('Error creando alerta en simulación:', alertError)
+          // No fallar la captura por error en alerta
+        }
+      } else {
+        logger.info('No se crea alerta', {
+          reason: versionNumber === 1 ? 'Primera versión' : 'Sin cambios detectados',
+          versionNumber,
+          changeCount: newSnapshot.changeCount
+        })
+      }
       
       return res.json({
         success: true,
