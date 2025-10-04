@@ -304,39 +304,42 @@ class CompleteBackendTester {
         throw new Error('No hay competidor de prueba disponible')
       }
       
-      // Simular diferentes versiones de HTML
+      // Obtener la versión inicial que ya existe
+      const existingSnapshot = await Snapshot.findOne({
+        where: { 
+          competitorId: this.testCompetitorId,
+          versionNumber: 1 
+        }
+      })
+      
+      if (!existingSnapshot) {
+        throw new Error('No se encontró la versión inicial')
+      }
+      
+      console.log(`✅ Versión inicial encontrada: ID ${existingSnapshot.id}`)
+      
+      // Simular diferentes versiones de HTML (empezando desde la versión 2)
       const htmlVersions = [
-        '<html><head><title>V1</title></head><body><h1>Versión 1</h1><p>Contenido original</p></body></html>',
         '<html><head><title>V2</title></head><body><h1>Versión 2</h1><p>Contenido modificado</p><p>Nuevo párrafo</p></body></html>',
         '<html><head><title>V3</title></head><body><h1>Versión 3</h1><p>Contenido completamente nuevo</p><div>Nueva sección</div></body></html>'
       ]
       
-      const snapshots = []
+      const snapshots = [existingSnapshot] // Incluir la versión inicial
       
       for (let i = 0; i < htmlVersions.length; i++) {
-        const versionNumber = i + 1
+        const versionNumber = i + 2 // Empezar desde la versión 2
         const html = htmlVersions[i]
         
         // Marcar versión anterior como no actual
-        if (versionNumber > 1) {
-          await Snapshot.update(
-            { isCurrent: false },
-            { where: { competitorId: this.testCompetitorId } }
-          )
-        }
+        await Snapshot.update(
+          { isCurrent: false },
+          { where: { competitorId: this.testCompetitorId } }
+        )
         
-        // Calcular cambios (simulado)
-        let changeCount = 0
-        let changePercentage = 0
-        let severity = 'low'
-        
-        if (versionNumber > 1) {
-          const previousHtml = htmlVersions[i - 1]
-          const changes = this.calculateSimpleChanges(previousHtml, html)
-          changeCount = changes.count
-          changePercentage = changes.percentage
-          severity = this.calculateSeverity(changePercentage)
-        }
+        // Calcular cambios comparando con la versión anterior
+        const previousHtml = i === 0 ? existingSnapshot.fullHtml : htmlVersions[i - 1]
+        const changes = this.calculateSimpleChanges(previousHtml, html)
+        const severity = this.calculateSeverity(changes.percentage)
         
         const snapshot = await Snapshot.create({
           competitorId: this.testCompetitorId,
@@ -344,14 +347,14 @@ class CompleteBackendTester {
           fullHtml: html,
           isFullVersion: true,
           isCurrent: true,
-          changeCount: changeCount,
-          changePercentage: changePercentage,
+          changeCount: changes.count,
+          changePercentage: changes.percentage,
           severity: severity,
-          changeSummary: `Versión ${versionNumber} - ${changeCount} cambios`
+          changeSummary: `Versión ${versionNumber} - ${changes.count} cambios`
         })
         
         snapshots.push(snapshot)
-        console.log(`✅ Versión ${versionNumber}: ${changeCount} cambios (${changePercentage.toFixed(2)}%) - ${severity}`)
+        console.log(`✅ Versión ${versionNumber}: ${changes.count} cambios (${changes.percentage.toFixed(2)}%) - ${severity}`)
       }
       
       // Verificar que todas las versiones se guardaron
