@@ -1112,7 +1112,7 @@ router.post('/:id/manual-check', validateCompetitor.getById, asyncHandler(async 
     }
 
     // Ejecutar captura manual
-    const result = await changeDetector.captureChange(competitor.id, {
+    const result = await changeDetector.captureChange(competitor.id, competitor.url, {
       simulate,
       htmlVersion,
       isManualCheck: true

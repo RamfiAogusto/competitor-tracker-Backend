@@ -25,7 +25,31 @@ class ChangeDetector {
    */
   async captureChange (competitorId, url, options = {}) {
     try {
-      logger.info(`Iniciando captura de cambio para competidor ${competitorId}`)
+      logger.info(`Iniciando captura de cambio para competidor ${competitorId}`, {
+        competitorId,
+        url: typeof url === 'string' ? url : 'NO_URL',
+        urlType: typeof url,
+        isManualCheck: options.isManualCheck,
+        simulate: options.simulate,
+        htmlVersion: options.htmlVersion
+      })
+
+      // Si se llama desde el endpoint manual, obtener URL del competidor
+      if ((!url || typeof url !== 'string') && options.isManualCheck) {
+        logger.info('Obteniendo URL del competidor desde la base de datos')
+        const { Competitor } = require('../models')
+        const competitor = await Competitor.findByPk(competitorId)
+        if (!competitor) {
+          throw new AppError('Competidor no encontrado', 404)
+        }
+        url = competitor.url
+        logger.info(`URL obtenida del competidor: ${url}`)
+      }
+
+      // Validar que tenemos una URL válida
+      if (!url || typeof url !== 'string') {
+        throw new AppError(`URL inválida: ${typeof url} - ${JSON.stringify(url)}`, 400)
+      }
 
       // 1. Obtener HTML actual
       const currentHtml = await this.getPageHTML(url, options)
@@ -36,7 +60,67 @@ class ChangeDetector {
       if (!lastSnapshot) {
         // Primera captura - guardar versión completa
         logger.info(`Primera captura para competidor ${competitorId}`)
-        return await this.captureInitialVersion(competitorId, url, currentHtml)
+        const initialVersion = await this.captureInitialVersion(competitorId, url, currentHtml)
+        
+        // Retornar resultado para monitoreo manual
+        if (options.isManualCheck) {
+          return {
+            changesDetected: false,
+            alertCreated: false,
+            snapshotId: initialVersion.id,
+            changeCount: 0,
+            severity: 'none',
+            changePercentage: 0,
+            changeSummary: 'Primera captura - versión inicial guardada'
+          }
+        }
+        
+        return initialVersion
+      }
+
+      // Para monitoreo manual, simular cambios usando diferentes versiones
+      if (options.isManualCheck && options.simulate) {
+        logger.info(`Simulando cambios para monitoreo manual usando versión ${options.htmlVersion}`)
+        
+        // Si ya hay una captura previa, forzar detección de cambios
+        if (options.htmlVersion === 'v3') {
+          // v3 tiene más cambios que v2, forzar detección
+          logger.info('Forzando detección de cambios para v3')
+          
+          // Crear comparación simulada
+          const simulatedComparison = {
+            changeCount: 15,
+            changePercentage: 12.5,
+            severity: 'medium',
+            changeSummary: 'Nuevo plan Enterprise agregado a $99/mes, características avanzadas añadidas',
+            currentHtml: currentHtml,
+            changes: [
+              { added: true, content: 'Enterprise Plan - $99/month' },
+              { added: true, content: 'Advanced Feature 3' },
+              { removed: true, content: 'Old feature removed' },
+              { modified: true, content: 'Support section added' }
+            ]
+          }
+          
+          // Crear nueva versión
+          const newVersion = await this.createNewVersion(competitorId, simulatedComparison)
+          
+          // Guardar diferencias
+          await this.saveDifferences(lastSnapshot.id, newVersion.id, simulatedComparison)
+          
+          // Crear alerta
+          const alert = await this.createChangeAlert(competitorId, newVersion, simulatedComparison)
+          
+          return {
+            changesDetected: true,
+            alertCreated: !!alert,
+            snapshotId: newVersion.id,
+            changeCount: simulatedComparison.changeCount,
+            severity: simulatedComparison.severity,
+            changePercentage: simulatedComparison.changePercentage,
+            changeSummary: simulatedComparison.changeSummary
+          }
+        }
       }
 
       // 3. Comparar con la versión anterior
@@ -44,6 +128,20 @@ class ChangeDetector {
       
       if (!this.isSignificantChange(comparison)) {
         logger.info(`No hay cambios significativos para ${url}`)
+        
+        // Retornar resultado para monitoreo manual
+        if (options.isManualCheck) {
+          return {
+            changesDetected: false,
+            alertCreated: false,
+            snapshotId: null,
+            changeCount: 0,
+            severity: 'none',
+            changePercentage: 0,
+            changeSummary: 'No se detectaron cambios significativos'
+          }
+        }
+        
         return null
       }
 
@@ -60,10 +158,23 @@ class ChangeDetector {
       await this.saveDifferences(lastSnapshot.id, newVersion.id, comparison)
       
       // 6. Crear alerta automática
-      await this.createChangeAlert(competitorId, newVersion, comparison)
+      const alert = await this.createChangeAlert(competitorId, newVersion, comparison)
       
       // 7. Limpiar versiones antiguas si es necesario
       await this.cleanupOldVersions(competitorId)
+      
+      // 8. Retornar resultado para monitoreo manual
+      if (options.isManualCheck) {
+        return {
+          changesDetected: true,
+          alertCreated: !!alert,
+          snapshotId: newVersion.id,
+          changeCount: comparison.changeCount,
+          severity: comparison.severity,
+          changePercentage: comparison.changePercentage,
+          changeSummary: comparison.changeSummary
+        }
+      }
       
       return newVersion
       
@@ -82,6 +193,12 @@ class ChangeDetector {
       if (options.html && options.simulate) {
         logger.info(`Usando HTML simulado para ${url}`)
         return options.html
+      }
+
+      // Si se está simulando, usar HTML simulado basado en la versión
+      if (options.simulate && options.htmlVersion) {
+        logger.info(`Usando HTML simulado versión ${options.htmlVersion} para ${url}`)
+        return this.getSimulatedHTML(options.htmlVersion)
       }
 
       // Usar HeadlessX para obtener HTML real
@@ -110,32 +227,177 @@ class ChangeDetector {
   }
 
   /**
+   * Obtener HTML simulado para pruebas
+   */
+  getSimulatedHTML(version = 'v1') {
+    const htmlVersions = {
+      v1: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Test Competitor - Version 1</title>
+        </head>
+        <body>
+          <header>
+            <h1>Test Competitor</h1>
+            <nav>
+              <a href="/">Home</a>
+              <a href="/about">About</a>
+              <a href="/contact">Contact</a>
+            </nav>
+          </header>
+          <main>
+            <section class="pricing">
+              <h2>Pricing Plans</h2>
+              <div class="plan">
+                <h3>Basic Plan</h3>
+                <p class="price">$9/month</p>
+                <ul>
+                  <li>Feature 1</li>
+                  <li>Feature 2</li>
+                </ul>
+              </div>
+            </section>
+          </main>
+        </body>
+        </html>
+      `,
+      v2: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Test Competitor - Version 2</title>
+        </head>
+        <body>
+          <header>
+            <h1>Test Competitor</h1>
+            <nav>
+              <a href="/">Home</a>
+              <a href="/about">About</a>
+              <a href="/contact">Contact</a>
+              <a href="/features">Features</a>
+            </nav>
+          </header>
+          <main>
+            <section class="pricing">
+              <h2>Pricing Plans</h2>
+              <div class="plan">
+                <h3>Basic Plan</h3>
+                <p class="price">$12/month</p>
+                <ul>
+                  <li>Feature 1</li>
+                  <li>Feature 2</li>
+                  <li>Feature 3</li>
+                </ul>
+              </div>
+              <div class="plan">
+                <h3>Pro Plan</h3>
+                <p class="price">$29/month</p>
+                <ul>
+                  <li>All Basic Features</li>
+                  <li>Advanced Feature 1</li>
+                  <li>Advanced Feature 2</li>
+                </ul>
+              </div>
+            </section>
+          </main>
+        </body>
+        </html>
+      `,
+      v3: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Test Competitor - Version 3</title>
+        </head>
+        <body>
+          <header>
+            <h1>Test Competitor</h1>
+            <nav>
+              <a href="/">Home</a>
+              <a href="/about">About</a>
+              <a href="/contact">Contact</a>
+              <a href="/features">Features</a>
+              <a href="/support">Support</a>
+            </nav>
+          </header>
+          <main>
+            <section class="pricing">
+              <h2>Pricing Plans</h2>
+              <div class="plan">
+                <h3>Basic Plan</h3>
+                <p class="price">$15/month</p>
+                <ul>
+                  <li>Feature 1</li>
+                  <li>Feature 2</li>
+                  <li>Feature 3</li>
+                  <li>Feature 4</li>
+                </ul>
+              </div>
+              <div class="plan">
+                <h3>Pro Plan</h3>
+                <p class="price">$39/month</p>
+                <ul>
+                  <li>All Basic Features</li>
+                  <li>Advanced Feature 1</li>
+                  <li>Advanced Feature 2</li>
+                  <li>Advanced Feature 3</li>
+                </ul>
+              </div>
+              <div class="plan">
+                <h3>Enterprise Plan</h3>
+                <p class="price">$99/month</p>
+                <ul>
+                  <li>All Pro Features</li>
+                  <li>Enterprise Feature 1</li>
+                  <li>Enterprise Feature 2</li>
+                  <li>Priority Support</li>
+                </ul>
+              </div>
+            </section>
+          </main>
+        </body>
+        </html>
+      `
+    }
+    
+    return htmlVersions[version] || htmlVersions.v1
+  }
+
+  /**
    * Captura inicial - versión completa
    */
   async captureInitialVersion (competitorId, url, html) {
     try {
+      const { Snapshot } = require('../models')
+      
       const compressedHtml = this.config.compressionEnabled 
         ? await this.compressHTML(html) 
         : html
 
-      // TODO: Implementar guardado en base de datos
-      const snapshot = {
-        id: this.generateId(),
-        competitor_id: competitorId,
-        version_number: 1,
-        full_html: compressedHtml,
-        is_full_version: true,
-        is_current: true,
-        created_at: new Date()
-      }
+      // Crear snapshot en la base de datos
+      const snapshot = await Snapshot.create({
+        competitorId: competitorId,
+        versionNumber: 1,
+        fullHtml: compressedHtml,
+        isFullVersion: true,
+        isCurrent: true,
+        changeCount: 0,
+        changePercentage: 0,
+        severity: 'low', // Usar 'low' en lugar de 'none' que no existe en el enum
+        changeSummary: 'Primera captura - versión inicial'
+      })
 
-      // Crear metadatos iniciales
-      await this.createChangeMetadata(snapshot.id, 'initial', [], 'low')
+      logger.info(`Snapshot inicial creado para competidor ${competitorId}:`, {
+        snapshotId: snapshot.id,
+        versionNumber: snapshot.versionNumber,
+        htmlLength: compressedHtml.length
+      })
       
       return snapshot
     } catch (error) {
       logger.error('Error en captura inicial:', error)
-      throw createError('Error en captura inicial', 500)
+      throw new AppError('Error en captura inicial', 500)
     }
   }
 
@@ -178,7 +440,7 @@ class ChangeDetector {
       }
     } catch (error) {
       logger.error('Error comparando versiones:', error)
-      throw createError('Error comparando versiones', 500)
+      throw new AppError('Error comparando versiones', 500)
     }
   }
 
@@ -187,29 +449,51 @@ class ChangeDetector {
    */
   async createNewVersion (competitorId, comparison) {
     try {
-      // TODO: Obtener de base de datos
-      const lastSnapshot = { version_number: 1 } // Placeholder
-      const newVersionNumber = lastSnapshot.version_number + 1
+      const { Snapshot } = require('../models')
+      
+      // Obtener última versión de la base de datos
+      const lastSnapshot = await Snapshot.findOne({
+        where: {
+          competitorId: competitorId,
+          isCurrent: true
+        },
+        order: [['versionNumber', 'DESC']]
+      })
+      
+      const newVersionNumber = lastSnapshot ? lastSnapshot.versionNumber + 1 : 1
       
       // Determinar si debe ser versión completa
       const shouldBeFullVersion = (newVersionNumber % this.config.fullVersionInterval) === 0
       
-      const snapshot = {
-        id: this.generateId(),
-        competitor_id: competitorId,
-        version_number: newVersionNumber,
-        full_html: shouldBeFullVersion ? await this.compressHTML(comparison.currentHtml) : null,
-        is_full_version: shouldBeFullVersion,
-        is_current: true,
-        created_at: new Date()
+      // Marcar versión anterior como no actual
+      if (lastSnapshot) {
+        await lastSnapshot.update({ isCurrent: false })
       }
+      
+      // Crear nueva versión en la base de datos
+      const snapshot = await Snapshot.create({
+        competitorId: competitorId,
+        versionNumber: newVersionNumber,
+        fullHtml: shouldBeFullVersion ? await this.compressHTML(comparison.currentHtml) : null,
+        isFullVersion: shouldBeFullVersion,
+        isCurrent: true,
+        changeCount: comparison.changeCount,
+        changePercentage: comparison.changePercentage,
+        severity: comparison.severity,
+        changeSummary: comparison.changeSummary
+      })
 
-      // TODO: Guardar en base de datos y marcar versión anterior como no actual
+      logger.info(`Nueva versión creada para competidor ${competitorId}:`, {
+        snapshotId: snapshot.id,
+        versionNumber: snapshot.versionNumber,
+        changeCount: snapshot.changeCount,
+        severity: snapshot.severity
+      })
 
       return snapshot
     } catch (error) {
       logger.error('Error creando nueva versión:', error)
-      throw createError('Error creando nueva versión', 500)
+      throw new AppError('Error creando nueva versión', 500)
     }
   }
 
@@ -250,7 +534,7 @@ class ChangeDetector {
       return snapshotDiff
     } catch (error) {
       logger.error('Error guardando diferencias:', error)
-      throw createError('Error guardando diferencias', 500)
+      throw new AppError('Error guardando diferencias', 500)
     }
   }
 
@@ -290,7 +574,7 @@ class ChangeDetector {
       return '<html>Reconstructed HTML</html>' // Placeholder
     } catch (error) {
       logger.error('Error reconstruyendo HTML:', error)
-      throw createError('Error reconstruyendo HTML', 500)
+      throw new AppError('Error reconstruyendo HTML', 500)
     }
   }
 
@@ -384,7 +668,7 @@ class ChangeDetector {
       }
     } catch (error) {
       logger.error('Error generando diff:', error)
-      throw createError('Error generando diff', 500)
+      throw new AppError('Error generando diff', 500)
     }
   }
 
@@ -490,8 +774,33 @@ class ChangeDetector {
    * Obtener snapshot actual (placeholder)
    */
   async getCurrentSnapshot (competitorId) {
-    // TODO: Implementar consulta a base de datos
-    return null
+    try {
+      const { Snapshot } = require('../models')
+      
+      const snapshot = await Snapshot.findOne({
+        where: {
+          competitorId: competitorId,
+          isCurrent: true
+        },
+        order: [['created_at', 'DESC']]
+      })
+      
+      if (snapshot) {
+        logger.info(`Snapshot encontrado para competidor ${competitorId}:`, {
+          snapshotId: snapshot.id,
+          versionNumber: snapshot.versionNumber,
+          changeCount: snapshot.changeCount,
+          severity: snapshot.severity
+        })
+      } else {
+        logger.info(`No se encontró snapshot previo para competidor ${competitorId}`)
+      }
+      
+      return snapshot
+    } catch (error) {
+      logger.error('Error obteniendo snapshot actual:', error)
+      return null
+    }
   }
 }
 

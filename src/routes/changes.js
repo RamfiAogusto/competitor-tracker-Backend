@@ -144,7 +144,7 @@ router.get('/', asyncHandler(async (req, res) => {
         changeCount: changeData.changeCount,
         changePercentage: changeData.changePercentage,
         changeSummary: changeData.changeSummary,
-        timestamp: formatTimestamp(changeData.created_at),
+        timestamp: changeData.created_at,
         date: formatDate(changeData.created_at),
         isFullVersion: changeData.isFullVersion,
         isCurrent: changeData.isCurrent
@@ -395,7 +395,7 @@ router.get('/:id', asyncHandler(async (req, res) => {
       changeCount: changeData.changeCount,
       changePercentage: changeData.changePercentage,
       changeSummary: changeData.changeSummary,
-      timestamp: formatTimestamp(changeData.created_at),
+      timestamp: changeData.created_at,
       date: formatDate(changeData.created_at),
       isFullVersion: changeData.isFullVersion,
       isCurrent: changeData.isCurrent,
@@ -420,21 +420,54 @@ router.get('/:id', asyncHandler(async (req, res) => {
 
 // Funciones helper
 function formatTimestamp(date) {
-  const now = new Date()
-  const diff = now - date
-  const minutes = Math.floor(diff / 60000)
-  const hours = Math.floor(diff / 3600000)
-  const days = Math.floor(diff / 86400000)
+  if (!date) return 'Fecha no disponible'
+  
+  try {
+    // Convertir a Date si es necesario
+    const dateObj = date instanceof Date ? date : new Date(date)
+    
+    if (isNaN(dateObj.getTime())) {
+      return 'Fecha inválida'
+    }
+    
+    const now = new Date()
+    const diff = now - dateObj
+    const minutes = Math.floor(diff / 60000)
+    const hours = Math.floor(diff / 3600000)
+    const days = Math.floor(diff / 86400000)
 
-  if (minutes < 1) return 'Just now'
-  if (minutes < 60) return `${minutes} minutes ago`
-  if (hours < 24) return `${hours} hours ago`
-  if (days < 7) return `${days} days ago`
-  return date.toLocaleDateString()
+    if (minutes < 1) return 'Ahora mismo'
+    if (minutes < 60) return `Hace ${minutes} minuto${minutes > 1 ? 's' : ''}`
+    if (hours < 24) return `Hace ${hours} hora${hours > 1 ? 's' : ''}`
+    if (days < 7) return `Hace ${days} día${days > 1 ? 's' : ''}`
+    
+    return dateObj.toLocaleDateString('es-ES', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    })
+  } catch (error) {
+    return 'Error de fecha'
+  }
 }
 
 function formatDate(date) {
-  return date.toISOString().split('T')[0]
+  if (!date) return 'Fecha no disponible'
+  
+  try {
+    // Convertir a Date si es necesario
+    const dateObj = date instanceof Date ? date : new Date(date)
+    
+    if (isNaN(dateObj.getTime())) {
+      return 'Fecha inválida'
+    }
+    
+    return dateObj.toISOString().split('T')[0]
+  } catch (error) {
+    return 'Error de fecha'
+  }
 }
 
 function generateMockChanges(summary, changeCount) {
