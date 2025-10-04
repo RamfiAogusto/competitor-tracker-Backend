@@ -84,6 +84,10 @@ const Competitor = sequelize.define('Competitor', {
     },
     {
       fields: ['last_checked_at']
+    },
+    {
+      unique: true,
+      fields: ['user_id', 'url']
     }
   ]
 })

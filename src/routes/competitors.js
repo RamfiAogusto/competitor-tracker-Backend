@@ -9,6 +9,7 @@ const { asyncHandler } = require('../middleware/errorHandler')
 const { validateCompetitor } = require('../middleware/validation')
 const changeDetector = require('../services/changeDetector')
 const logger = require('../utils/logger')
+const { Competitor, Snapshot } = require('../models')
 
 /**
  * GET /api/competitors
@@ -26,35 +27,59 @@ router.get('/', validateCompetitor.list, asyncHandler(async (req, res) => {
     sortOrder
   })
 
-  // TODO: Implementar consulta a base de datos
-  const competitors = {
-    data: [
-      {
-        id: '550e8400-e29b-41d4-a716-446655440000',
-        name: 'TechCorp',
-        url: 'https://techcorp.com',
-        description: 'Competidor principal en tecnología',
-        monitoringEnabled: true,
-        checkInterval: 3600,
-        lastChecked: new Date().toISOString(),
-        totalVersions: 15,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      }
-    ],
-    pagination: {
-      page: parseInt(page),
-      limit: parseInt(limit),
-      total: 1,
-      totalPages: 1
-    }
-  }
+  try {
+    // Configurar paginación
+    const pageNum = Math.max(1, parseInt(page))
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit)))
+    const offset = (pageNum - 1) * limitNum
 
-  res.json({
-    success: true,
-    data: competitors.data,
-    pagination: competitors.pagination
-  })
+    // Construir condiciones de búsqueda
+    const whereConditions = {
+      userId: req.user.id,
+      isActive: true
+    }
+
+    // Agregar búsqueda por nombre si se proporciona
+    if (search && search.trim()) {
+      whereConditions.name = {
+        [require('sequelize').Op.iLike]: `%${search.trim()}%`
+      }
+    }
+
+    // Validar campos de ordenamiento
+    const allowedSortFields = ['name', 'url', 'createdAt', 'updatedAt', 'lastCheckedAt', 'totalVersions']
+    const sortField = allowedSortFields.includes(sortBy) ? sortBy : 'createdAt'
+    const sortDirection = sortOrder.toUpperCase() === 'ASC' ? 'ASC' : 'DESC'
+
+    // Ejecutar consulta con paginación
+    const { count, rows } = await Competitor.findAndCountAll({
+      where: whereConditions,
+      limit: limitNum,
+      offset: offset,
+      order: [[sortField, sortDirection]],
+      attributes: {
+        exclude: ['userId'] // No exponer userId en la respuesta
+      }
+    })
+
+    const totalPages = Math.ceil(count / limitNum)
+
+    res.json({
+      success: true,
+      data: rows,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total: count,
+        totalPages: totalPages,
+        hasNext: pageNum < totalPages,
+        hasPrev: pageNum > 1
+      }
+    })
+  } catch (error) {
+    logger.error('Error al listar competidores:', error)
+    throw error
+  }
 }))
 
 /**
@@ -69,24 +94,33 @@ router.get('/:id', validateCompetitor.getById, asyncHandler(async (req, res) => 
     competitorId: id
   })
 
-  // TODO: Implementar consulta a base de datos
-  const competitor = {
-    id,
-    name: 'TechCorp',
-    url: 'https://techcorp.com',
-    description: 'Competidor principal en tecnología',
-    monitoringEnabled: true,
-    checkInterval: 3600,
-    lastChecked: new Date().toISOString(),
-    totalVersions: 15,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
-  }
+  try {
+    const competitor = await Competitor.findOne({
+      where: {
+        id: id,
+        userId: req.user.id,
+        isActive: true
+      },
+      attributes: {
+        exclude: ['userId'] // No exponer userId en la respuesta
+      }
+    })
 
-  res.json({
-    success: true,
-    data: competitor
-  })
+    if (!competitor) {
+      return res.status(404).json({
+        success: false,
+        message: 'Competidor no encontrado'
+      })
+    }
+
+    res.json({
+      success: true,
+      data: competitor
+    })
+  } catch (error) {
+    logger.error('Error al obtener competidor:', error)
+    throw error
+  }
 }))
 
 /**
@@ -102,25 +136,60 @@ router.post('/', validateCompetitor.create, asyncHandler(async (req, res) => {
     url
   })
 
-  // TODO: Implementar creación en base de datos
-  const newCompetitor = {
-    id: require('crypto').randomUUID(),
-    name,
-    url,
-    description,
-    monitoringEnabled,
-    checkInterval,
-    lastChecked: null,
-    totalVersions: 0,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
-  }
+  try {
+    // Verificar que la URL no esté duplicada para este usuario
+    const existingCompetitor = await Competitor.findOne({
+      where: {
+        userId: req.user.id,
+        url: url,
+        isActive: true
+      }
+    })
 
-  res.status(201).json({
-    success: true,
-    message: 'Competidor creado exitosamente',
-    data: newCompetitor
-  })
+    if (existingCompetitor) {
+      return res.status(409).json({
+        success: false,
+        message: 'Ya existe un competidor con esta URL'
+      })
+    }
+
+    // Crear el competidor
+    const newCompetitor = await Competitor.create({
+      userId: req.user.id,
+      name,
+      url,
+      description,
+      monitoringEnabled,
+      checkInterval
+    })
+
+    // Remover userId de la respuesta
+    const competitorData = newCompetitor.toJSON()
+    delete competitorData.userId
+
+    res.status(201).json({
+      success: true,
+      message: 'Competidor creado exitosamente',
+      data: competitorData
+    })
+  } catch (error) {
+    logger.error('Error al crear competidor:', error)
+    
+    // Manejar errores específicos de validación
+    if (error.name === 'SequelizeValidationError') {
+      const validationErrors = error.errors.map(err => ({
+        field: err.path,
+        message: err.message
+      }))
+      return res.status(400).json({
+        success: false,
+        message: 'Datos de entrada inválidos',
+        details: validationErrors
+      })
+    }
+
+    throw error
+  }
 }))
 
 /**
@@ -137,18 +206,75 @@ router.put('/:id', validateCompetitor.update, asyncHandler(async (req, res) => {
     updateData
   })
 
-  // TODO: Implementar actualización en base de datos
-  const updatedCompetitor = {
-    id,
-    ...updateData,
-    updatedAt: new Date().toISOString()
-  }
+  try {
+    // Buscar el competidor
+    const competitor = await Competitor.findOne({
+      where: {
+        id: id,
+        userId: req.user.id,
+        isActive: true
+      }
+    })
 
-  res.json({
-    success: true,
-    message: 'Competidor actualizado exitosamente',
-    data: updatedCompetitor
-  })
+    if (!competitor) {
+      return res.status(404).json({
+        success: false,
+        message: 'Competidor no encontrado'
+      })
+    }
+
+    // Si se está actualizando la URL, verificar que no esté duplicada
+    if (updateData.url && updateData.url !== competitor.url) {
+      const existingCompetitor = await Competitor.findOne({
+        where: {
+          userId: req.user.id,
+          url: updateData.url,
+          isActive: true,
+          id: { [require('sequelize').Op.ne]: id }
+        }
+      })
+
+      if (existingCompetitor) {
+        return res.status(409).json({
+          success: false,
+          message: 'Ya existe un competidor con esta URL'
+        })
+      }
+    }
+
+    // Actualizar el competidor
+    await competitor.update(updateData)
+
+    // Obtener el competidor actualizado
+    const updatedCompetitor = await Competitor.findByPk(id, {
+      attributes: {
+        exclude: ['userId']
+      }
+    })
+
+    res.json({
+      success: true,
+      message: 'Competidor actualizado exitosamente',
+      data: updatedCompetitor
+    })
+  } catch (error) {
+    logger.error('Error al actualizar competidor:', error)
+    
+    // Manejar errores específicos de validación
+    if (error.name === 'SequelizeValidationError') {
+      const validationErrors = error.errors.map(err => ({
+        field: err.path,
+        message: err.message
+      }))
+      return res.status(400).json({
+        success: false,
+        message: 'Datos de entrada inválidos',
+        details: validationErrors
+      })
+    }
+
+    throw error
+  }
 }))
 
 /**
@@ -163,12 +289,34 @@ router.delete('/:id', validateCompetitor.getById, asyncHandler(async (req, res) 
     competitorId: id
   })
 
-  // TODO: Implementar eliminación en base de datos
+  try {
+    // Buscar el competidor
+    const competitor = await Competitor.findOne({
+      where: {
+        id: id,
+        userId: req.user.id,
+        isActive: true
+      }
+    })
 
-  res.json({
-    success: true,
-    message: 'Competidor eliminado exitosamente'
-  })
+    if (!competitor) {
+      return res.status(404).json({
+        success: false,
+        message: 'Competidor no encontrado'
+      })
+    }
+
+    // Soft delete - marcar como inactivo
+    await competitor.update({ isActive: false })
+
+    res.json({
+      success: true,
+      message: 'Competidor eliminado exitosamente'
+    })
+  } catch (error) {
+    logger.error('Error al eliminar competidor:', error)
+    throw error
+  }
 }))
 
 /**
