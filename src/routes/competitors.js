@@ -383,40 +383,69 @@ router.get('/:id/history', validateCompetitor.list, asyncHandler(async (req, res
     offset
   })
 
-  // TODO: Implementar consulta a base de datos
-  const history = {
-    data: [
-      {
-        id: '550e8400-e29b-41d4-a716-446655440001',
-        versionNumber: 15,
-        changeCount: 3,
-        changePercentage: 2.5,
-        severity: 'low',
-        changeSummary: '2 líneas añadidas, 1 línea eliminada',
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: '550e8400-e29b-41d4-a716-446655440002',
-        versionNumber: 14,
-        changeCount: 8,
-        changePercentage: 5.2,
-        severity: 'medium',
-        changeSummary: '5 líneas añadidas, 3 líneas eliminadas',
-        createdAt: new Date(Date.now() - 86400000).toISOString()
+  try {
+    // Verificar que el competidor existe y pertenece al usuario
+    const competitor = await Competitor.findOne({
+      where: {
+        id: id,
+        userId: req.user.id,
+        isActive: true
       }
-    ],
-    pagination: {
+    })
+
+    if (!competitor) {
+      return res.status(404).json({
+        success: false,
+        message: 'Competidor no encontrado'
+      })
+    }
+
+    // Obtener historial de snapshots
+    const { count, rows } = await Snapshot.findAndCountAll({
+      where: {
+        competitorId: id
+      },
       limit: parseInt(limit),
       offset: parseInt(offset),
-      total: 15
-    }
-  }
+      order: [['versionNumber', 'DESC']],
+      attributes: [
+        'id',
+        'versionNumber',
+        'isFullVersion',
+        'isCurrent',
+        'changeCount',
+        'changePercentage',
+        'severity',
+        'changeSummary',
+        'createdAt',
+        'updatedAt'
+      ]
+    })
 
-  res.json({
-    success: true,
-    data: history.data,
-    pagination: history.pagination
-  })
+    const history = {
+      data: rows,
+      pagination: {
+        limit: parseInt(limit),
+        offset: parseInt(offset),
+        total: count
+      }
+    }
+
+    logger.info('Historial obtenido exitosamente', {
+      competitorId: id,
+      totalVersions: count,
+      returnedVersions: rows.length
+    })
+
+    res.json({
+      success: true,
+      data: history.data,
+      pagination: history.pagination
+    })
+  } catch (error) {
+    logger.error('Error obteniendo historial:', error)
+    throw error
+  }
 }))
 
 /**
@@ -432,17 +461,111 @@ router.get('/:id/version/:versionNumber/html', validateCompetitor.getById, async
     versionNumber
   })
 
-  // TODO: Implementar obtención de HTML desde base de datos
-  const html = '<html><head><title>Versión ' + versionNumber + '</title></head><body>HTML de la versión ' + versionNumber + '</body></html>'
+  try {
+    // Verificar que el competidor existe y pertenece al usuario
+    const competitor = await Competitor.findOne({
+      where: {
+        id: id,
+        userId: req.user.id,
+        isActive: true
+      }
+    })
 
-  res.json({
-    success: true,
-    data: {
-      versionNumber: parseInt(versionNumber),
-      html,
-      timestamp: new Date().toISOString()
+    if (!competitor) {
+      return res.status(404).json({
+        success: false,
+        message: 'Competidor no encontrado'
+      })
     }
-  })
+
+    // Buscar el snapshot específico
+    const snapshot = await Snapshot.findOne({
+      where: {
+        competitorId: id,
+        versionNumber: parseInt(versionNumber)
+      }
+    })
+
+    if (!snapshot) {
+      return res.status(404).json({
+        success: false,
+        message: 'Versión no encontrada'
+      })
+    }
+
+    // Reconstruir HTML completo
+    let fullHtml = ''
+    
+    if (snapshot.isFullVersion) {
+      // Es una versión completa, descomprimir directamente
+      const changeDetector = require('../services/changeDetector')
+      fullHtml = await changeDetector.decompressHtml(snapshot.fullHtml)
+    } else {
+      // Es una versión diferencial, necesitamos reconstruir desde la versión anterior
+      const changeDetector = require('../services/changeDetector')
+      
+      // Buscar la versión completa anterior más cercana
+      const previousFullVersion = await Snapshot.findOne({
+        where: {
+          competitorId: id,
+          isFullVersion: true,
+          versionNumber: { [require('sequelize').Op.lte]: parseInt(versionNumber) }
+        },
+        order: [['versionNumber', 'DESC']]
+      })
+
+      if (!previousFullVersion) {
+        return res.status(404).json({
+          success: false,
+          message: 'No se puede reconstruir la versión: falta versión base'
+        })
+      }
+
+      // Descomprimir la versión base
+      let baseHtml = await changeDetector.decompressHtml(previousFullVersion.fullHtml)
+
+      // Aplicar cambios incrementales desde la versión base hasta la solicitada
+      const intermediateVersions = await Snapshot.findAll({
+        where: {
+          competitorId: id,
+          versionNumber: { 
+            [require('sequelize').Op.gt]: previousFullVersion.versionNumber,
+            [require('sequelize').Op.lte]: parseInt(versionNumber)
+          },
+          isFullVersion: false
+        },
+        order: [['versionNumber', 'ASC']]
+      })
+
+      // Aplicar cada cambio incremental
+      for (const version of intermediateVersions) {
+        const changes = await changeDetector.decompressHtml(version.fullHtml)
+        baseHtml = await changeDetector.applyChanges(baseHtml, changes)
+      }
+
+      fullHtml = baseHtml
+    }
+
+    logger.info('HTML de versión obtenido exitosamente', {
+      competitorId: id,
+      versionNumber: parseInt(versionNumber),
+      isFullVersion: snapshot.isFullVersion,
+      htmlLength: fullHtml.length
+    })
+
+    res.json({
+      success: true,
+      data: {
+        versionNumber: parseInt(versionNumber),
+        html: fullHtml,
+        timestamp: snapshot.createdAt,
+        isFullVersion: snapshot.isFullVersion
+      }
+    })
+  } catch (error) {
+    logger.error('Error obteniendo HTML de versión:', error)
+    throw error
+  }
 }))
 
 /**
@@ -457,12 +580,44 @@ router.post('/:id/enable-monitoring', validateCompetitor.getById, asyncHandler(a
     competitorId: id
   })
 
-  // TODO: Implementar habilitación de monitoreo
+  try {
+    // Buscar el competidor
+    const competitor = await Competitor.findOne({
+      where: {
+        id: id,
+        userId: req.user.id,
+        isActive: true
+      }
+    })
 
-  res.json({
-    success: true,
-    message: 'Monitoreo habilitado exitosamente'
-  })
+    if (!competitor) {
+      return res.status(404).json({
+        success: false,
+        message: 'Competidor no encontrado'
+      })
+    }
+
+    // Habilitar monitoreo
+    await competitor.update({ monitoringEnabled: true })
+
+    logger.info('Monitoreo habilitado exitosamente', {
+      competitorId: id,
+      competitorName: competitor.name
+    })
+
+    res.json({
+      success: true,
+      message: 'Monitoreo habilitado exitosamente',
+      data: {
+        id: competitor.id,
+        name: competitor.name,
+        monitoringEnabled: true
+      }
+    })
+  } catch (error) {
+    logger.error('Error habilitando monitoreo:', error)
+    throw error
+  }
 }))
 
 /**
@@ -477,12 +632,195 @@ router.post('/:id/disable-monitoring', validateCompetitor.getById, asyncHandler(
     competitorId: id
   })
 
-  // TODO: Implementar deshabilitación de monitoreo
+  try {
+    // Buscar el competidor
+    const competitor = await Competitor.findOne({
+      where: {
+        id: id,
+        userId: req.user.id,
+        isActive: true
+      }
+    })
 
-  res.json({
-    success: true,
-    message: 'Monitoreo deshabilitado exitosamente'
+    if (!competitor) {
+      return res.status(404).json({
+        success: false,
+        message: 'Competidor no encontrado'
+      })
+    }
+
+    // Deshabilitar monitoreo
+    await competitor.update({ monitoringEnabled: false })
+
+    logger.info('Monitoreo deshabilitado exitosamente', {
+      competitorId: id,
+      competitorName: competitor.name
+    })
+
+    res.json({
+      success: true,
+      message: 'Monitoreo deshabilitado exitosamente',
+      data: {
+        id: competitor.id,
+        name: competitor.name,
+        monitoringEnabled: false
+      }
+    })
+  } catch (error) {
+    logger.error('Error deshabilitando monitoreo:', error)
+    throw error
+  }
+}))
+
+/**
+ * GET /api/competitors/:id/diff/:v1/:v2
+ * Comparar dos versiones de un competidor
+ */
+router.get('/:id/diff/:v1/:v2', validateCompetitor.getById, asyncHandler(async (req, res) => {
+  const { id, v1, v2 } = req.params
+
+  logger.info('Comparando versiones', {
+    userId: req.user.id,
+    competitorId: id,
+    version1: v1,
+    version2: v2
   })
+
+  try {
+    // Verificar que el competidor existe y pertenece al usuario
+    const competitor = await Competitor.findOne({
+      where: {
+        id: id,
+        userId: req.user.id,
+        isActive: true
+      }
+    })
+
+    if (!competitor) {
+      return res.status(404).json({
+        success: false,
+        message: 'Competidor no encontrado'
+      })
+    }
+
+    // Buscar ambas versiones
+    const [version1, version2] = await Promise.all([
+      Snapshot.findOne({
+        where: {
+          competitorId: id,
+          versionNumber: parseInt(v1)
+        }
+      }),
+      Snapshot.findOne({
+        where: {
+          competitorId: id,
+          versionNumber: parseInt(v2)
+        }
+      })
+    ])
+
+    if (!version1) {
+      return res.status(404).json({
+        success: false,
+        message: `Versión ${v1} no encontrada`
+      })
+    }
+
+    if (!version2) {
+      return res.status(404).json({
+        success: false,
+        message: `Versión ${v2} no encontrada`
+      })
+    }
+
+    // Reconstruir HTML de ambas versiones
+    const changeDetector = require('../services/changeDetector')
+    
+    // Función helper para reconstruir HTML
+    const reconstructHtml = async (snapshot) => {
+      if (snapshot.isFullVersion) {
+        return await changeDetector.decompressHtml(snapshot.fullHtml)
+      } else {
+        // Buscar versión base y aplicar cambios
+        const baseVersion = await Snapshot.findOne({
+          where: {
+            competitorId: id,
+            isFullVersion: true,
+            versionNumber: { [require('sequelize').Op.lte]: snapshot.versionNumber }
+          },
+          order: [['versionNumber', 'DESC']]
+        })
+
+        if (!baseVersion) {
+          throw new Error('No se puede reconstruir: falta versión base')
+        }
+
+        let baseHtml = await changeDetector.decompressHtml(baseVersion.fullHtml)
+
+        const intermediateVersions = await Snapshot.findAll({
+          where: {
+            competitorId: id,
+            versionNumber: { 
+              [require('sequelize').Op.gt]: baseVersion.versionNumber,
+              [require('sequelize').Op.lte]: snapshot.versionNumber
+            },
+            isFullVersion: false
+          },
+          order: [['versionNumber', 'ASC']]
+        })
+
+        for (const version of intermediateVersions) {
+          const changes = await changeDetector.decompressHtml(version.fullHtml)
+          baseHtml = await changeDetector.applyChanges(baseHtml, changes)
+        }
+
+        return baseHtml
+      }
+    }
+
+    const [html1, html2] = await Promise.all([
+      reconstructHtml(version1),
+      reconstructHtml(version2)
+    ])
+
+    // Generar diff
+    const diff = changeDetector.generateDiff(html1, html2)
+
+    logger.info('Comparación de versiones completada', {
+      competitorId: id,
+      version1: v1,
+      version2: v2,
+      changes: diff.changes.length,
+      severity: diff.severity
+    })
+
+    res.json({
+      success: true,
+      data: {
+        competitorId: id,
+        version1: {
+          number: parseInt(v1),
+          timestamp: version1.createdAt,
+          isFullVersion: version1.isFullVersion
+        },
+        version2: {
+          number: parseInt(v2),
+          timestamp: version2.createdAt,
+          isFullVersion: version2.isFullVersion
+        },
+        diff: {
+          changes: diff.changes,
+          changeCount: diff.changeCount,
+          changePercentage: diff.changePercentage,
+          severity: diff.severity,
+          summary: diff.summary
+        }
+      }
+    })
+  } catch (error) {
+    logger.error('Error comparando versiones:', error)
+    throw error
+  }
 }))
 
 module.exports = router

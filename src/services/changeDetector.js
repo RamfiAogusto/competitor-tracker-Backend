@@ -329,6 +329,67 @@ class ChangeDetector {
   }
 
   /**
+   * Generar diff entre dos HTML (método simplificado para tests)
+   */
+  generateDiff (oldHtml, newHtml) {
+    try {
+      const changes = diff.diffLines(oldHtml, newHtml)
+      
+      const significantChanges = changes.filter(change => {
+        if (change.added || change.removed) {
+          const changeLength = change.value.trim().length
+          return changeLength >= this.config.significantChangeThreshold
+        }
+        return false
+      })
+
+      const totalLines = newHtml.split('\n').length
+      const changedLines = significantChanges.reduce((acc, change) => {
+        return acc + (change.added ? change.count : 0) + (change.removed ? change.count : 0)
+      }, 0)
+
+      const changePercentage = (changedLines / totalLines) * 100
+
+      return {
+        changes: significantChanges,
+        changeCount: significantChanges.length,
+        changePercentage: changePercentage,
+        totalLines: totalLines,
+        changedLines: changedLines,
+        severity: this.calculateSeverity(changePercentage, significantChanges),
+        summary: this.generateChangeSummary(significantChanges)
+      }
+    } catch (error) {
+      logger.error('Error generando diff:', error)
+      throw createError('Error generando diff', 500)
+    }
+  }
+
+  /**
+   * Aplicar cambios a HTML (método simplificado para reconstrucción)
+   */
+  async applyChanges (baseHtml, changesJson) {
+    try {
+      const changes = JSON.parse(changesJson)
+      let result = baseHtml
+      
+      // Aplicar cada cambio en orden
+      for (const change of changes) {
+        if (change.added) {
+          result += change.value
+        } else if (change.removed) {
+          result = result.replace(change.value, '')
+        }
+      }
+      
+      return result
+    } catch (error) {
+      logger.error('Error aplicando cambios:', error)
+      return baseHtml
+    }
+  }
+
+  /**
    * Compresión/Descompresión
    */
   async compressHTML (html) {
@@ -349,6 +410,11 @@ class ChangeDetector {
       logger.error('Error descomprimiendo HTML:', error)
       return compressedHtml
     }
+  }
+
+  // Alias para compatibilidad con rutas
+  async decompressHtml (compressedHtml) {
+    return this.decompressHTML(compressedHtml)
   }
 
   /**
