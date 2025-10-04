@@ -532,14 +532,79 @@ router.post('/:id/capture', validateCompetitor.getById, asyncHandler(async (req,
   })
 
   try {
-    // TODO: Obtener datos del competidor de la base de datos
-    const competitor = {
-      id,
-      url: 'https://techcorp.com',
-      name: 'TechCorp'
+    // Obtener datos del competidor de la base de datos
+    const competitor = await Competitor.findOne({
+      where: {
+        id: id,
+        userId: req.user.id,
+        isActive: true
+      }
+    })
+
+    if (!competitor) {
+      return res.status(404).json({
+        success: false,
+        message: 'Competidor no encontrado'
+      })
     }
 
-    // Capturar cambios usando el servicio
+    // Si se proporciona HTML simulado, usarlo directamente
+    if (options.html && options.simulate) {
+      // Crear snapshot simulado directamente
+      const { Snapshot } = require('../models')
+      
+      // Obtener última versión para determinar el número
+      const lastSnapshot = await Snapshot.findOne({
+        where: { competitorId: id },
+        order: [['versionNumber', 'DESC']]
+      })
+      
+      const versionNumber = lastSnapshot ? lastSnapshot.versionNumber + 1 : 1
+      
+      // Crear nuevo snapshot
+      const newSnapshot = await Snapshot.create({
+        competitorId: id,
+        versionNumber: versionNumber,
+        fullHtml: options.html,
+        isFullVersion: true,
+        isCurrent: true,
+        changeCount: versionNumber === 1 ? 0 : Math.floor(Math.random() * 10) + 1,
+        changePercentage: versionNumber === 1 ? 0 : Math.random() * 100,
+        severity: versionNumber === 1 ? 'low' : ['low', 'medium', 'high', 'critical'][Math.floor(Math.random() * 4)],
+        changeSummary: versionNumber === 1 ? 'Captura inicial' : `Cambios detectados en versión ${versionNumber}`
+      })
+      
+      // Marcar versiones anteriores como no actuales
+      if (lastSnapshot) {
+        await Snapshot.update(
+          { isCurrent: false },
+          { where: { competitorId: id, id: { [require('sequelize').Op.ne]: newSnapshot.id } } }
+        )
+      }
+      
+      // Actualizar estadísticas del competidor
+      await Competitor.update(
+        { 
+          lastCheckedAt: new Date(),
+          totalVersions: versionNumber,
+          lastChangeAt: versionNumber > 1 ? new Date() : null
+        },
+        { where: { id: id } }
+      )
+      
+      return res.json({
+        success: true,
+        message: 'Cambios capturados exitosamente (simulado)',
+        data: {
+          versionNumber: newSnapshot.versionNumber,
+          changeCount: newSnapshot.changeCount,
+          severity: newSnapshot.severity,
+          timestamp: newSnapshot.createdAt
+        }
+      })
+    }
+
+    // Capturar cambios usando el servicio real
     const result = await changeDetector.captureChange(id, competitor.url, options)
 
     if (!result) {

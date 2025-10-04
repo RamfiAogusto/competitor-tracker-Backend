@@ -9,7 +9,7 @@ const { promisify } = require('util')
 const config = require('../config')
 const logger = require('../utils/logger')
 const headlessXService = require('./headlessXService')
-const { createError } = require('../middleware/errorHandler')
+const { AppError } = require('../middleware/errorHandler')
 
 const gzip = promisify(zlib.gzip)
 const gunzip = promisify(zlib.gunzip)
@@ -65,7 +65,10 @@ class ChangeDetector {
       
     } catch (error) {
       logger.error('Error capturando cambio:', error)
-      throw createError('Error capturando cambios', 500)
+      throw new AppError({
+        message: 'Error capturando cambios',
+        statusCode: 500
+      })
     }
   }
 
@@ -82,7 +85,10 @@ class ChangeDetector {
 
       return result.html
     } catch (error) {
-      throw createError(`Error obteniendo HTML de ${url}: ${error.message}`, 502)
+      throw new AppError({
+        message: `Error obteniendo HTML de ${url}: ${error.message}`,
+        statusCode: 502
+      })
     }
   }
 

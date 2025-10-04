@@ -12,6 +12,7 @@ const captureRoutes = require('./captures')
 const alertRoutes = require('./alerts')
 const userRoutes = require('./users')
 const dashboardRoutes = require('./dashboard')
+const changeRoutes = require('./changes')
 
 // Middleware de autenticación
 const { authenticateToken } = require('../middleware/auth')
@@ -24,6 +25,7 @@ router.use('/competitors', authenticateToken, competitorRoutes)
 router.use('/captures', authenticateToken, captureRoutes)
 router.use('/alerts', authenticateToken, alertRoutes)
 router.use('/dashboard', authenticateToken, dashboardRoutes)
+router.use('/changes', authenticateToken, changeRoutes)
 
 // Ruta de información de la API
 router.get('/info', (req, res) => {
@@ -36,7 +38,8 @@ router.get('/info', (req, res) => {
       captures: '/api/captures',
       alerts: '/api/alerts',
       users: '/api/users',
-      dashboard: '/api/dashboard'
+      dashboard: '/api/dashboard',
+      changes: '/api/changes'
     },
     documentation: '/api/docs',
     health: '/health'
