@@ -27,7 +27,8 @@ const sequelize = new Sequelize({
     ssl: process.env.NODE_ENV === 'production' ? {
       require: true,
       rejectUnauthorized: false
-    } : false
+    } : false,
+    charset: 'utf8'
   }
 })
 

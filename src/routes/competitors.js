@@ -197,6 +197,7 @@ router.get('/overview', asyncHandler(async (req, res) => {
   }
 }))
 
+
 /**
  * GET /api/competitors/:id
  * Obtener un competidor específico
@@ -252,7 +253,7 @@ router.post('/', validateCompetitor.create, asyncHandler(async (req, res) => {
   })
 
   try {
-    // Verificar que la URL no esté duplicada para este usuario
+    // Verificar que la URL no esté duplicada para este usuario (solo activos)
     const existingCompetitor = await Competitor.findOne({
       where: {
         userId: req.user.id,
@@ -261,10 +262,12 @@ router.post('/', validateCompetitor.create, asyncHandler(async (req, res) => {
       }
     })
 
+
     if (existingCompetitor) {
       return res.status(409).json({
         success: false,
-        message: 'Ya existe un competidor con esta URL'
+        message: 'Ya existe un competidor con esta URL. Por favor, usa una URL diferente.',
+        code: 'DUPLICATE_COMPETITOR'
       })
     }
 
@@ -300,6 +303,15 @@ router.post('/', validateCompetitor.create, asyncHandler(async (req, res) => {
         success: false,
         message: 'Datos de entrada inválidos',
         details: validationErrors
+      })
+    }
+
+    // Manejar error de competidor duplicado
+    if (error.name === 'SequelizeUniqueConstraintError') {
+      return res.status(409).json({
+        success: false,
+        message: 'Ya existe un competidor con esta URL. Por favor, usa una URL diferente.',
+        code: 'DUPLICATE_COMPETITOR'
       })
     }
 

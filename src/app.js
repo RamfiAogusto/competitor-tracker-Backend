@@ -82,15 +82,23 @@ class App {
       }))
     }
 
-    // Parsing de JSON y URL-encoded
-    this.app.use(express.json({ limit: '10mb' }))
-    this.app.use(express.urlencoded({ extended: true, limit: '10mb' }))
+    // Parsing de JSON y URL-encoded con UTF-8
+    this.app.use(express.json({ 
+      limit: '10mb',
+      type: 'application/json'
+    }))
+    this.app.use(express.urlencoded({ 
+      extended: true, 
+      limit: '10mb',
+      type: 'application/x-www-form-urlencoded'
+    }))
 
-    // Headers de seguridad adicionales
+    // Headers de seguridad y encoding
     this.app.use((req, res, next) => {
       res.setHeader('X-Content-Type-Options', 'nosniff')
       res.setHeader('X-Frame-Options', 'DENY')
       res.setHeader('X-XSS-Protection', '1; mode=block')
+      res.setHeader('Content-Type', 'application/json; charset=utf-8')
       next()
     })
   }
