@@ -1080,6 +1080,83 @@ router.post('/:id/disable-monitoring', validateCompetitor.getById, asyncHandler(
 }))
 
 /**
+ * POST /api/competitors/:id/manual-check
+ * Ejecutar monitoreo manual de un competidor
+ */
+router.post('/:id/manual-check', validateCompetitor.getById, asyncHandler(async (req, res) => {
+  const { id } = req.params
+  const { simulate = true, htmlVersion = 'v2' } = req.body
+
+  logger.info('Ejecutando monitoreo manual', {
+    userId: req.user.id,
+    competitorId: id,
+    simulate,
+    htmlVersion
+  })
+
+  try {
+    // Buscar el competidor
+    const competitor = await Competitor.findOne({
+      where: {
+        id,
+        userId: req.user.id,
+        isActive: true
+      }
+    })
+
+    if (!competitor) {
+      return res.status(404).json({
+        success: false,
+        message: 'Competidor no encontrado'
+      })
+    }
+
+    // Ejecutar captura manual
+    const result = await changeDetector.captureChange(competitor.id, {
+      simulate,
+      htmlVersion,
+      isManualCheck: true
+    })
+
+    // Actualizar última verificación
+    await competitor.update({
+      lastCheckedAt: new Date()
+    })
+
+    logger.info('Monitoreo manual completado', {
+      userId: req.user.id,
+      competitorId: id,
+      competitorName: competitor.name,
+      changesDetected: result.changesDetected,
+      alertCreated: result.alertCreated
+    })
+
+    res.json({
+      success: true,
+      data: {
+        competitorId: id,
+        competitorName: competitor.name,
+        changesDetected: result.changesDetected,
+        alertCreated: result.alertCreated,
+        snapshotId: result.snapshotId,
+        changeCount: result.changeCount,
+        severity: result.severity,
+        timestamp: new Date().toISOString()
+      },
+      message: result.changesDetected 
+        ? `Se detectaron ${result.changeCount} cambios (${result.severity})`
+        : 'No se detectaron cambios'
+    })
+  } catch (error) {
+    logger.error('Error en monitoreo manual:', error)
+    res.status(500).json({
+      success: false,
+      message: `Error ejecutando monitoreo: ${error.message}`
+    })
+  }
+}))
+
+/**
  * POST /api/competitors/:id/start-monitoring
  * Iniciar monitoreo automático de un competidor
  */
