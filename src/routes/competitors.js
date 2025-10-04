@@ -227,6 +227,62 @@ router.get('/overview', asyncHandler(async (req, res) => {
 
 
 /**
+ * GET /api/competitors/:id/monitoring-status
+ * Obtener estado del monitoreo de un competidor
+ */
+router.get('/:id/monitoring-status', validateCompetitor.getById, asyncHandler(async (req, res) => {
+  const { id } = req.params
+
+  logger.info('Obteniendo estado de monitoreo', {
+    userId: req.user.id,
+    competitorId: id
+  })
+
+  try {
+    // Buscar el competidor
+    const competitor = await Competitor.findOne({
+      where: {
+        id: id,
+        userId: req.user.id,
+        isActive: true
+      },
+      attributes: ['id', 'name', 'url', 'monitoringEnabled', 'checkInterval', 'lastCheckedAt', 'totalVersions', 'lastChangeAt']
+    })
+
+    if (!competitor) {
+      return res.status(404).json({
+        success: false,
+        message: 'Competidor no encontrado'
+      })
+    }
+
+    // Calcular próxima captura
+    const nextCapture = competitor.lastCheckedAt 
+      ? new Date(new Date(competitor.lastCheckedAt).getTime() + competitor.checkInterval * 1000)
+      : new Date(Date.now() + competitor.checkInterval * 1000)
+
+    res.json({
+      success: true,
+      data: {
+        id: competitor.id,
+        name: competitor.name,
+        url: competitor.url,
+        monitoringEnabled: competitor.monitoringEnabled,
+        checkInterval: competitor.checkInterval,
+        lastCheckedAt: competitor.lastCheckedAt,
+        nextCapture: nextCapture.toISOString(),
+        totalVersions: competitor.totalVersions,
+        lastChangeAt: competitor.lastChangeAt,
+        status: competitor.monitoringEnabled ? 'active' : 'paused'
+      }
+    })
+  } catch (error) {
+    logger.error('Error obteniendo estado de monitoreo:', error)
+    throw error
+  }
+}))
+
+/**
  * GET /api/competitors/:id
  * Obtener un competidor específico
  */
@@ -1019,6 +1075,94 @@ router.post('/:id/disable-monitoring', validateCompetitor.getById, asyncHandler(
     })
   } catch (error) {
     logger.error('Error deshabilitando monitoreo:', error)
+    throw error
+  }
+}))
+
+/**
+ * POST /api/competitors/:id/start-monitoring
+ * Iniciar monitoreo automático de un competidor
+ */
+router.post('/:id/start-monitoring', validateCompetitor.getById, asyncHandler(async (req, res) => {
+  const { id } = req.params
+  const { interval = 3600, options = {} } = req.body // interval en segundos, default 1 hora
+
+  logger.info('Iniciando monitoreo automático', {
+    userId: req.user.id,
+    competitorId: id,
+    interval,
+    options
+  })
+
+  try {
+    // Buscar el competidor
+    const competitor = await Competitor.findOne({
+      where: {
+        id: id,
+        userId: req.user.id,
+        isActive: true
+      }
+    })
+
+    if (!competitor) {
+      return res.status(404).json({
+        success: false,
+        message: 'Competidor no encontrado'
+      })
+    }
+
+    // Validar intervalo (mínimo 5 minutos, máximo 24 horas)
+    const minInterval = 300 // 5 minutos
+    const maxInterval = 86400 // 24 horas
+    const validatedInterval = Math.max(minInterval, Math.min(maxInterval, parseInt(interval)))
+
+    // Actualizar configuración de monitoreo
+    await competitor.update({
+      monitoringEnabled: true,
+      checkInterval: validatedInterval
+    })
+
+    // Ejecutar primera captura inmediatamente
+    logger.info('Ejecutando captura inicial para monitoreo', {
+      userId: req.user.id,
+      competitorId: id,
+      competitorUrl: competitor.url
+    })
+
+    const changeDetector = require('../services/changeDetector')
+    const initialCapture = await changeDetector.captureChange(id, competitor.url, {
+      ...options,
+      isInitialCapture: true
+    })
+
+    // Programar próximas capturas (esto se implementaría con un sistema de colas como Bull)
+    // Por ahora, solo registramos la configuración
+    logger.info('Monitoreo automático configurado', {
+      userId: req.user.id,
+      competitorId: id,
+      competitorName: competitor.name,
+      interval: validatedInterval,
+      nextCapture: new Date(Date.now() + validatedInterval * 1000).toISOString()
+    })
+
+    res.json({
+      success: true,
+      message: `Monitoreo automático iniciado para ${competitor.name}`,
+      data: {
+        id: competitor.id,
+        name: competitor.name,
+        monitoringEnabled: true,
+        checkInterval: validatedInterval,
+        initialCapture: initialCapture ? {
+          versionNumber: initialCapture.versionNumber,
+          changeCount: initialCapture.changeCount,
+          severity: initialCapture.severity
+        } : null,
+        nextCapture: new Date(Date.now() + validatedInterval * 1000).toISOString()
+      }
+    })
+  } catch (error) {
+    logger.error('Error iniciando monitoreo automático:', error)
     throw error
   }
 }))

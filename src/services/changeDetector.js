@@ -69,10 +69,7 @@ class ChangeDetector {
       
     } catch (error) {
       logger.error('Error capturando cambio:', error)
-      throw new AppError({
-        message: 'Error capturando cambios',
-        statusCode: 500
-      })
+      throw new AppError(`Error capturando cambios: ${error.message || error}`, 500)
     }
   }
 
@@ -81,18 +78,34 @@ class ChangeDetector {
    */
   async getPageHTML (url, options = {}) {
     try {
+      // Si se proporciona HTML simulado, usarlo
+      if (options.html && options.simulate) {
+        logger.info(`Usando HTML simulado para ${url}`)
+        return options.html
+      }
+
+      // Usar HeadlessX para obtener HTML real
+      logger.info(`Obteniendo HTML real de ${url}`)
       const result = await headlessXService.extractHTML(url, {
         waitFor: options.waitFor || 2000,
         viewport: options.viewport || { width: 1920, height: 1080 },
-        removeScripts: true
+        removeScripts: true,
+        timeout: options.timeout || 30000,
+        screenshot: options.screenshot || false,
+        fullPage: options.fullPage !== false
       })
 
-      return result.html
+      return result.html || result
     } catch (error) {
-      throw new AppError({
-        message: `Error obteniendo HTML de ${url}: ${error.message}`,
-        statusCode: 502
-      })
+      logger.error(`Error obteniendo HTML de ${url}:`, error)
+      
+      // Si es una captura inicial, no fallar completamente
+      if (options.isInitialCapture) {
+        logger.warn(`Captura inicial falló para ${url}, usando HTML básico`)
+        return `<html><head><title>Error - ${url}</title></head><body><h1>Error al cargar página</h1><p>URL: ${url}</p><p>Error: ${error.message}</p></body></html>`
+      }
+      
+      throw new AppError(`Error obteniendo HTML de ${url}: ${error.message}`, 502)
     }
   }
 
