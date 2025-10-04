@@ -51,7 +51,7 @@ router.get('/', validateCompetitor.list, asyncHandler(async (req, res) => {
     const sortField = allowedSortFields.includes(sortBy) ? sortBy : 'created_at'
     const sortDirection = sortOrder.toUpperCase() === 'ASC' ? 'ASC' : 'DESC'
 
-    // Ejecutar consulta con paginación
+    // Ejecutar consulta con paginación y incluir último snapshot
     const { count, rows } = await Competitor.findAndCountAll({
       where: whereConditions,
       limit: limitNum,
@@ -59,14 +59,47 @@ router.get('/', validateCompetitor.list, asyncHandler(async (req, res) => {
       order: [[sortField, sortDirection]],
       attributes: {
         exclude: ['userId'] // No exponer userId en la respuesta
+      },
+      include: [
+        {
+          model: Snapshot,
+          as: 'lastSnapshot',
+          required: false,
+          where: {
+            isCurrent: true
+          },
+          attributes: ['id', 'versionNumber', 'changeCount', 'severity', 'created_at']
+        }
+      ]
+    })
+
+    // Transformar datos para incluir información de severidad
+    const competitorsWithSeverity = rows.map(competitor => {
+      const competitorData = competitor.toJSON()
+      
+      // Agregar severidad del último cambio
+      if (competitorData.lastSnapshot && competitorData.lastSnapshot.length > 0) {
+        const lastSnapshot = competitorData.lastSnapshot[0]
+        competitorData.severity = lastSnapshot.severity
+        competitorData.changeCount = lastSnapshot.changeCount
+        competitorData.lastChangeAt = lastSnapshot.created_at
+      } else {
+        competitorData.severity = 'low'
+        competitorData.changeCount = 0
+        competitorData.lastChangeAt = null
       }
+
+      // Remover el array de snapshots de la respuesta
+      delete competitorData.lastSnapshot
+      
+      return competitorData
     })
 
     const totalPages = Math.ceil(count / limitNum)
 
     res.json({
       success: true,
-      data: rows,
+      data: competitorsWithSeverity,
       pagination: {
         page: pageNum,
         limit: limitNum,
@@ -78,6 +111,88 @@ router.get('/', validateCompetitor.list, asyncHandler(async (req, res) => {
     })
   } catch (error) {
     logger.error('Error al listar competidores:', error)
+    throw error
+  }
+}))
+
+/**
+ * GET /api/competitors/overview
+ * Obtener estadísticas de competidores
+ */
+router.get('/overview', asyncHandler(async (req, res) => {
+  logger.info('Obteniendo estadísticas de competidores', {
+    userId: req.user.id
+  })
+
+  try {
+    // Obtener estadísticas básicas
+    const totalCompetitors = await Competitor.count({
+      where: {
+        userId: req.user.id,
+        isActive: true
+      }
+    })
+
+    const activeMonitoring = await Competitor.count({
+      where: {
+        userId: req.user.id,
+        isActive: true,
+        monitoringEnabled: true
+      }
+    })
+
+    const pausedMonitoring = totalCompetitors - activeMonitoring
+
+    // Obtener estadísticas de severidad
+    const severityStats = await Competitor.findAll({
+      where: {
+        userId: req.user.id,
+        isActive: true
+      },
+      include: [
+        {
+          model: Snapshot,
+          as: 'lastSnapshot',
+          required: false,
+          where: {
+            isCurrent: true
+          },
+          attributes: ['severity']
+        }
+      ],
+      attributes: ['id']
+    })
+
+    // Contar por severidad
+    const severityCounts = {
+      critical: 0,
+      high: 0,
+      medium: 0,
+      low: 0
+    }
+
+    severityStats.forEach(competitor => {
+      const lastSnapshot = competitor.lastSnapshot && competitor.lastSnapshot[0]
+      const severity = lastSnapshot ? lastSnapshot.severity : 'low'
+      severityCounts[severity] = (severityCounts[severity] || 0) + 1
+    })
+
+    // Calcular tiempo promedio de verificación (simulado por ahora)
+    const avgCheckTime = "2.3m"
+
+    res.json({
+      success: true,
+      data: {
+        total: totalCompetitors,
+        active: activeMonitoring,
+        paused: pausedMonitoring,
+        highPriority: severityCounts.high + severityCounts.critical,
+        avgCheckTime: avgCheckTime,
+        severity: severityCounts
+      }
+    })
+  } catch (error) {
+    logger.error('Error obteniendo estadísticas:', error)
     throw error
   }
 }))

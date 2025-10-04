@@ -29,6 +29,13 @@ Competitor.hasMany(Snapshot, {
   onDelete: 'CASCADE'
 })
 
+// Un competidor puede tener un snapshot actual
+Competitor.hasMany(Snapshot, {
+  foreignKey: 'competitorId',
+  as: 'lastSnapshot',
+  onDelete: 'CASCADE'
+})
+
 // Un snapshot pertenece a un competidor
 Snapshot.belongsTo(Competitor, {
   foreignKey: 'competitorId',

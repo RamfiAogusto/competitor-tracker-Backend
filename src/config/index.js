@@ -43,9 +43,9 @@ const config = {
   // Autenticación JWT
   jwt: {
     secret: process.env.JWT_SECRET || 'your-super-secret-key',
-    expiresIn: process.env.JWT_EXPIRES_IN || '7d',
+    expiresIn: process.env.JWT_EXPIRES_IN || '30d', // Extendido para pruebas
     refreshSecret: process.env.REFRESH_TOKEN_SECRET || 'your-refresh-secret',
-    refreshExpiresIn: process.env.REFRESH_TOKEN_EXPIRES_IN || '30d'
+    refreshExpiresIn: process.env.REFRESH_TOKEN_EXPIRES_IN || '90d' // Extendido para pruebas
   },
 
   // Rate limiting
