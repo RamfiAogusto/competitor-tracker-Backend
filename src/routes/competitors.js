@@ -647,18 +647,20 @@ router.post('/:id/capture', validateCompetitor.getById, asyncHandler(async (req,
             severity: newSnapshot.severity
           })
           
-          const alertService = require('../services/alertService')
-          const alert = await alertService.createChangeAlert({
-            userId: req.user.id,
-            competitorId: id,
-            snapshotId: newSnapshot.id,
-            changeCount: newSnapshot.changeCount,
-            changePercentage: newSnapshot.changePercentage,
-            severity: newSnapshot.severity,
-            versionNumber: newSnapshot.versionNumber,
-            changeSummary: `Simulación: ${newSnapshot.changeCount} cambios detectados`,
-            affectedSections: ['content', 'navigation']
-          })
+            const alertService = require('../services/alertService')
+            const alert = await alertService.createChangeAlert({
+              userId: req.user.id,
+              competitorId: id,
+              snapshotId: newSnapshot.id,
+              changeCount: newSnapshot.changeCount,
+              changePercentage: newSnapshot.changePercentage,
+              severity: newSnapshot.severity,
+              versionNumber: newSnapshot.versionNumber,
+              changeSummary: `Simulación: ${newSnapshot.changeCount} cambios detectados`,
+              affectedSections: ['content', 'navigation'],
+              previousHtml: lastSnapshot ? lastSnapshot.fullHtml : null,
+              currentHtml: options.html
+            })
           
           logger.info('Alerta creada exitosamente', {
             alertId: alert.id,

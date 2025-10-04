@@ -6,6 +6,7 @@
 const { Alert, Competitor } = require('../models')
 const logger = require('../utils/logger')
 const { AppError } = require('../middleware/errorHandler')
+const smartMessageGenerator = require('./smartMessageGenerator')
 
 class AlertService {
   constructor() {
@@ -39,7 +40,9 @@ class AlertService {
         severity,
         versionNumber,
         changeSummary,
-        affectedSections
+        affectedSections,
+        previousHtml,
+        currentHtml
       } = changeData
 
       // Obtener información del competidor
@@ -54,9 +57,24 @@ class AlertService {
         })
       }
 
+      // Generar mensaje inteligente si tenemos HTML anterior y actual
+      let smartMessage = null
+      if (previousHtml && currentHtml) {
+        smartMessage = smartMessageGenerator.generateSmartMessage({
+          competitorName: competitor.name,
+          changeCount,
+          changePercentage,
+          severity,
+          previousHtml,
+          currentHtml,
+          changeSummary,
+          affectedSections
+        })
+      }
+
       // Generar título y mensaje
       const title = this.generateAlertTitle(competitor.name, changeCount, severity)
-      const message = this.generateAlertMessage(
+      const message = smartMessage || this.generateAlertMessage(
         competitor.name,
         changeCount,
         changePercentage,
