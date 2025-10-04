@@ -249,9 +249,7 @@ const validateUser = {
     
     body('password')
       .isLength({ min: 8 })
-      .withMessage('La contraseña debe tener al menos 8 caracteres')
-      .matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/)
-      .withMessage('La contraseña debe contener al menos una minúscula, una mayúscula, un número y un carácter especial'),
+      .withMessage('La contraseña debe tener al menos 8 caracteres'),
     
     body('name')
       .trim()
