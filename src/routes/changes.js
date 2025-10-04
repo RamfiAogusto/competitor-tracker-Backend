@@ -134,8 +134,8 @@ router.get('/', asyncHandler(async (req, res) => {
       return {
         id: changeData.id,
         competitorId: changeData.competitorId,
-        competitorName: changeData.competitor.name,
-        competitorUrl: changeData.competitor.url,
+        competitorName: changeData.competitor?.name || 'Competidor desconocido',
+        competitorUrl: changeData.competitor?.url || '',
         versionNumber: changeData.versionNumber,
         title,
         description,
@@ -291,6 +291,12 @@ router.get('/stats', asyncHandler(async (req, res) => {
       highChanges: severityCounts.high,
       mediumChanges: severityCounts.medium,
       lowChanges: severityCounts.low,
+      bySeverity: {
+        critical: severityCounts.critical,
+        high: severityCounts.high,
+        medium: severityCounts.medium,
+        low: severityCounts.low
+      },
       mostActiveCompetitor: {
         name: mostActiveCompetitor.name || 'N/A',
         changeCount: competitorChangeCounts[mostActiveCompetitorId] || 0
@@ -379,8 +385,8 @@ router.get('/:id', asyncHandler(async (req, res) => {
     const changeDetails = {
       id: changeData.id,
       competitorId: changeData.competitorId,
-      competitorName: changeData.competitor.name,
-      competitorUrl: changeData.competitor.url,
+      competitorName: changeData.competitor?.name || 'Competidor desconocido',
+      competitorUrl: changeData.competitor?.url || '',
       versionNumber: changeData.versionNumber,
       title,
       description,
@@ -399,7 +405,7 @@ router.get('/:id', asyncHandler(async (req, res) => {
     logger.info('Detalles de cambio obtenidos exitosamente', {
       userId: req.user.id,
       changeId: id,
-      competitorName: changeData.competitor.name
+      competitorName: changeData.competitor?.name || 'Competidor desconocido'
     })
 
     res.json({
