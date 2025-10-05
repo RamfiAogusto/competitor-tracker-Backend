@@ -10,7 +10,7 @@ const { asyncHandler } = require('../middleware/errorHandler')
 const { validateCompetitor } = require('../middleware/validation')
 const changeDetector = require('../services/changeDetector')
 const logger = require('../utils/logger')
-const { Competitor, Snapshot } = require('../models')
+const { Competitor, Snapshot, Alert } = require('../models')
 
 // Aplicar autenticación a todas las rutas
 router.use(authenticateToken)
@@ -537,12 +537,12 @@ router.put('/:id', validateCompetitor.update, asyncHandler(async (req, res) => {
 
 /**
  * DELETE /api/competitors/:id
- * Eliminar un competidor
+ * Eliminar un competidor y todos sus datos relacionados
  */
 router.delete('/:id', validateCompetitor.getById, asyncHandler(async (req, res) => {
   const { id } = req.params
 
-  logger.info('Eliminando competidor', {
+  logger.info('Eliminando competidor y datos relacionados', {
     userId: req.user.id,
     competitorId: id
   })
@@ -554,7 +554,19 @@ router.delete('/:id', validateCompetitor.getById, asyncHandler(async (req, res) 
         id: id,
         userId: req.user.id,
         isActive: true
-      }
+      },
+      include: [
+        {
+          model: Snapshot,
+          as: 'snapshots',
+          required: false
+        },
+        {
+          model: Alert,
+          as: 'alerts',
+          required: false
+        }
+      ]
     })
 
     if (!competitor) {
@@ -564,12 +576,35 @@ router.delete('/:id', validateCompetitor.getById, asyncHandler(async (req, res) 
       })
     }
 
-    // Soft delete - marcar como inactivo
-    await competitor.update({ isActive: false })
+    // Obtener estadísticas antes de eliminar para el log
+    const snapshotCount = competitor.snapshots ? competitor.snapshots.length : 0
+    const alertCount = competitor.alerts ? competitor.alerts.length : 0
+
+    logger.info('Datos relacionados encontrados', {
+      competitorId: id,
+      competitorName: competitor.name,
+      snapshots: snapshotCount,
+      alerts: alertCount
+    })
+
+    // Eliminar físicamente el competidor (esto activará CASCADE para snapshots y alertas)
+    await competitor.destroy()
+
+    logger.info('Competidor y datos relacionados eliminados exitosamente', {
+      competitorId: id,
+      competitorName: competitor.name,
+      snapshotsEliminados: snapshotCount,
+      alertsEliminadas: alertCount
+    })
 
     res.json({
       success: true,
-      message: 'Competidor eliminado exitosamente'
+      message: `Competidor "${competitor.name}" eliminado exitosamente`,
+      data: {
+        competitorId: id,
+        snapshotsEliminados: snapshotCount,
+        alertsEliminadas: alertCount
+      }
     })
   } catch (error) {
     logger.error('Error al eliminar competidor:', error)
