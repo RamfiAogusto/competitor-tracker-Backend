@@ -8,6 +8,8 @@ const router = express.Router()
 const { asyncHandler } = require('../middleware/errorHandler')
 const headlessXService = require('../services/headlessXService')
 const logger = require('../utils/logger')
+const { Competitor, Snapshot, Alert } = require('../models')
+const { Op } = require('sequelize')
 
 /**
  * GET /api/dashboard/overview
@@ -18,52 +20,138 @@ router.get('/overview', asyncHandler(async (req, res) => {
     userId: req.user.id
   })
 
-  // TODO: Implementar consultas a base de datos
-  const overview = {
-    stats: {
-      totalCompetitors: 25,
-      activeMonitors: 22,
-      totalChanges: 145,
-      criticalAlerts: 3,
-      lastCheck: new Date().toISOString()
-    },
-    trends: {
-      changesLast7Days: [12, 8, 15, 22, 18, 14, 16],
-      alertsLast7Days: [2, 1, 4, 6, 3, 2, 3],
-      competitorsAdded: [1, 0, 2, 1, 0, 1, 0]
-    },
-    recentActivity: [
-      {
-        id: '1',
-        type: 'change_detected',
-        competitorName: 'TechCorp',
-        message: 'Cambios detectados en página de precios',
-        severity: 'high',
-        timestamp: new Date().toISOString()
-      },
-      {
-        id: '2',
-        type: 'competitor_added',
-        competitorName: 'NewCorp',
-        message: 'Nuevo competidor agregado',
-        severity: 'info',
-        timestamp: new Date(Date.now() - 3600000).toISOString()
-      },
-      {
-        id: '3',
-        type: 'alert_created',
-        competitorName: 'StartupXYZ',
-        message: 'Nueva página detectada',
-        severity: 'medium',
-        timestamp: new Date(Date.now() - 7200000).toISOString()
-      }
-    ]
-  }
+  try {
+    // Obtener estadísticas básicas
+    const totalCompetitors = await Competitor.count({
+      where: { userId: req.user.id, isActive: true }
+    })
 
-  res.json({
-    success: true,
-    data: overview
-  })
+    const activeMonitors = await Competitor.count({
+      where: { 
+        userId: req.user.id, 
+        isActive: true,
+        monitoringEnabled: true 
+      }
+    })
+
+    const totalChanges = await Snapshot.count({
+      include: [{
+        model: Competitor,
+        as: 'competitor',
+        where: { userId: req.user.id, isActive: true },
+        attributes: []
+      }],
+      where: {
+        versionNumber: { [Op.gt]: 1 } // Excluir capturas iniciales
+      }
+    })
+
+    const criticalAlerts = await Alert.count({
+      include: [{
+        model: Competitor,
+        as: 'competitor',
+        where: { userId: req.user.id, isActive: true },
+        attributes: []
+      }],
+      where: { severity: 'critical' }
+    })
+
+    // Log para debugging
+    logger.info('Estadísticas obtenidas del dashboard', {
+      userId: req.user.id,
+      totalCompetitors,
+      activeMonitors,
+      totalChanges,
+      criticalAlerts
+    })
+
+    // Obtener última verificación
+    const lastCheck = await Competitor.findOne({
+      where: { userId: req.user.id, isActive: true },
+      order: [['lastCheckedAt', 'DESC']],
+      attributes: ['lastCheckedAt']
+    })
+
+    // Obtener cambios recientes para actividad reciente
+    const recentChanges = await Snapshot.findAll({
+      include: [{
+        model: Competitor,
+        as: 'competitor',
+        where: { userId: req.user.id, isActive: true },
+        attributes: ['name', 'url']
+      }],
+      where: {
+        versionNumber: { [Op.gt]: 1 }
+      },
+      order: [['created_at', 'DESC']],
+      limit: 5
+    })
+
+    // Obtener alertas recientes
+    const recentAlerts = await Alert.findAll({
+      include: [{
+        model: Competitor,
+        as: 'competitor',
+        where: { userId: req.user.id, isActive: true },
+        attributes: ['name', 'url']
+      }],
+      order: [['created_at', 'DESC']],
+      limit: 3
+    })
+
+    // Construir actividad reciente
+    const recentActivity = []
+    
+    recentChanges.forEach((change, index) => {
+      recentActivity.push({
+        id: `change_${change.id}`,
+        type: 'change_detected',
+        competitorName: change.competitor?.name || 'Competidor desconocido',
+        message: change.changeSummary || 'Cambios detectados',
+        severity: change.severity || 'medium',
+        timestamp: change.created_at
+      })
+    })
+
+    recentAlerts.forEach((alert) => {
+      recentActivity.push({
+        id: `alert_${alert.id}`,
+        type: 'alert_created',
+        competitorName: alert.competitor?.name || 'Competidor desconocido',
+        message: alert.message || 'Nueva alerta generada',
+        severity: alert.severity || 'medium',
+        timestamp: alert.created_at
+      })
+    })
+
+    // Ordenar por timestamp descendente
+    recentActivity.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+
+    const overview = {
+      stats: {
+        totalCompetitors,
+        activeMonitors,
+        totalChanges,
+        criticalAlerts,
+        lastCheck: lastCheck?.lastCheckedAt || null
+      },
+      trends: {
+        // TODO: Implementar tendencias reales
+        changesLast7Days: [12, 8, 15, 22, 18, 14, 16],
+        alertsLast7Days: [2, 1, 4, 6, 3, 2, 3],
+        competitorsAdded: [1, 0, 2, 1, 0, 1, 0]
+      },
+      recentActivity: recentActivity.slice(0, 5)
+    }
+
+    res.json({
+      success: true,
+      data: overview
+    })
+  } catch (error) {
+    logger.error('Error obteniendo resumen del dashboard:', error)
+    throw error
+  }
 }))
 
 /**
@@ -79,52 +167,157 @@ router.get('/stats', asyncHandler(async (req, res) => {
     metric
   })
 
-  // TODO: Implementar consultas de estadísticas
-  const stats = {
-    period,
-    competitors: {
-      total: 25,
-      active: 22,
-      inactive: 3,
-      addedThisPeriod: 5
-    },
-    changes: {
-      total: 145,
-      bySeverity: {
-        critical: 8,
-        high: 32,
-        medium: 67,
-        low: 38
-      },
-      byType: {
-        content_change: 89,
-        price_change: 23,
-        new_page: 15,
-        page_removed: 3,
-        layout_change: 15
-      }
-    },
-    alerts: {
-      total: 45,
-      unread: 8,
-      bySeverity: {
-        critical: 3,
-        high: 12,
-        medium: 20,
-        low: 10
-      }
-    },
-    performance: {
-      averageResponseTime: 2.3,
-      successRate: 98.5,
-      lastUptime: '99.9%'
-    }
-  }
+  try {
+    // Estadísticas de competidores
+    const totalCompetitors = await Competitor.count({
+      where: { userId: req.user.id, isActive: true }
+    })
 
-  res.json({
-    success: true,
-    data: stats
-  })
+    const activeCompetitors = await Competitor.count({
+      where: { 
+        userId: req.user.id, 
+        isActive: true,
+        monitoringEnabled: true 
+      }
+    })
+
+    const inactiveCompetitors = await Competitor.count({
+      where: { 
+        userId: req.user.id, 
+        isActive: true,
+        monitoringEnabled: false 
+      }
+    })
+
+    // Estadísticas de cambios
+    const totalChanges = await Snapshot.count({
+      include: [{
+        model: Competitor,
+        as: 'competitor',
+        where: { userId: req.user.id, isActive: true },
+        attributes: []
+      }],
+      where: {
+        versionNumber: { [Op.gt]: 1 }
+      }
+    })
+
+    // Cambios por severidad
+    const changesBySeverity = await Snapshot.findAll({
+      include: [{
+        model: Competitor,
+        as: 'competitor',
+        where: { userId: req.user.id, isActive: true },
+        attributes: []
+      }],
+      where: {
+        versionNumber: { [Op.gt]: 1 }
+      },
+      attributes: [
+        'severity',
+        [Sequelize.fn('COUNT', Sequelize.col('Snapshot.id')), 'count']
+      ],
+      group: ['severity']
+    })
+
+    const severityCounts = {
+      critical: 0,
+      high: 0,
+      medium: 0,
+      low: 0
+    }
+
+    changesBySeverity.forEach(item => {
+      const severity = item.dataValues.severity || 'low'
+      severityCounts[severity] = parseInt(item.dataValues.count)
+    })
+
+    // Estadísticas de alertas
+    const totalAlerts = await Alert.count({
+      include: [{
+        model: Competitor,
+        as: 'competitor',
+        where: { userId: req.user.id, isActive: true },
+        attributes: []
+      }]
+    })
+
+    const unreadAlerts = await Alert.count({
+      include: [{
+        model: Competitor,
+        as: 'competitor',
+        where: { userId: req.user.id, isActive: true },
+        attributes: []
+      }],
+      where: { readAt: null }
+    })
+
+    // Alertas por severidad
+    const alertsBySeverity = await Alert.findAll({
+      include: [{
+        model: Competitor,
+        as: 'competitor',
+        where: { userId: req.user.id, isActive: true },
+        attributes: []
+      }],
+      attributes: [
+        'severity',
+        [Sequelize.fn('COUNT', Sequelize.col('Alert.id')), 'count']
+      ],
+      group: ['severity']
+    })
+
+    const alertSeverityCounts = {
+      critical: 0,
+      high: 0,
+      medium: 0,
+      low: 0
+    }
+
+    alertsBySeverity.forEach(item => {
+      const severity = item.dataValues.severity || 'low'
+      alertSeverityCounts[severity] = parseInt(item.dataValues.count)
+    })
+
+    const stats = {
+      period,
+      competitors: {
+        total: totalCompetitors,
+        active: activeCompetitors,
+        inactive: inactiveCompetitors,
+        addedThisPeriod: 0 // TODO: Implementar cálculo por período
+      },
+      changes: {
+        total: totalChanges,
+        bySeverity: severityCounts,
+        byType: {
+          content_change: totalChanges, // TODO: Implementar detección de tipos
+          price_change: 0,
+          new_page: 0,
+          page_removed: 0,
+          layout_change: 0
+        }
+      },
+      alerts: {
+        total: totalAlerts,
+        unread: unreadAlerts,
+        bySeverity: alertSeverityCounts
+      },
+      performance: {
+        averageResponseTime: 2.3, // TODO: Implementar métricas reales
+        successRate: 98.5,
+        lastUptime: '99.9%'
+      }
+    }
+
+    res.json({
+      success: true,
+      data: stats
+    })
+  } catch (error) {
+    logger.error('Error obteniendo estadísticas del dashboard:', error)
+    throw error
+  }
 }))
 
 /**
@@ -140,41 +333,79 @@ router.get('/competitors/top-changes', asyncHandler(async (req, res) => {
     period
   })
 
-  // TODO: Implementar consulta a base de datos
-  const topChanges = [
-    {
-      id: '550e8400-e29b-41d4-a716-446655440001',
-      name: 'TechCorp',
-      url: 'https://techcorp.com',
-      totalChanges: 23,
-      criticalChanges: 3,
-      lastChange: new Date().toISOString(),
-      changeTrend: 'increasing'
-    },
-    {
-      id: '550e8400-e29b-41d4-a716-446655440002',
-      name: 'StartupXYZ',
-      url: 'https://startupxyz.io',
-      totalChanges: 18,
-      criticalChanges: 1,
-      lastChange: new Date(Date.now() - 86400000).toISOString(),
-      changeTrend: 'stable'
-    },
-    {
-      id: '550e8400-e29b-41d4-a716-446655440003',
-      name: 'InnovateCorp',
-      url: 'https://innovatecorp.com',
-      totalChanges: 15,
-      criticalChanges: 2,
-      lastChange: new Date(Date.now() - 172800000).toISOString(),
-      changeTrend: 'decreasing'
-    }
-  ]
+  try {
+    // Obtener competidores con conteo de cambios
+    const topCompetitors = await Competitor.findAll({
+      where: { userId: req.user.id, isActive: true },
+      include: [{
+        model: Snapshot,
+        as: 'snapshots',
+        where: {
+          versionNumber: { [Op.gt]: 1 } // Excluir capturas iniciales
+        },
+        attributes: ['severity', 'created_at'],
+        required: false
+      }],
+      attributes: [
+        'id',
+        'name', 
+        'url',
+        'priority',
+        'monitoringEnabled',
+        'lastCheckedAt',
+        'lastChangeAt'
+      ]
+    })
 
-  res.json({
-    success: true,
-    data: topChanges.slice(0, parseInt(limit))
-  })
+    // Procesar datos para obtener estadísticas
+    const competitorsWithStats = topCompetitors.map(competitor => {
+      const changes = competitor.snapshots || []
+      const totalChanges = changes.length
+      const criticalChanges = changes.filter(s => s.severity === 'critical').length
+      const highChanges = changes.filter(s => s.severity === 'high').length
+      
+      // Obtener último cambio
+      const lastChange = changes.length > 0 
+        ? changes.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0].created_at
+        : null
+
+      // Calcular tendencia (simplificado)
+      const recentChanges = changes.filter(s => {
+        const changeDate = new Date(s.created_at)
+        const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+        return changeDate > weekAgo
+      }).length
+
+      const olderChanges = totalChanges - recentChanges
+      let changeTrend = 'stable'
+      if (recentChanges > olderChanges) changeTrend = 'increasing'
+      else if (recentChanges < olderChanges) changeTrend = 'decreasing'
+
+      return {
+        id: competitor.id,
+        name: competitor.name,
+        url: competitor.url,
+        totalChanges,
+        criticalChanges,
+        highChanges,
+        lastChange,
+        changeTrend,
+        priority: competitor.priority || 'medium',
+        monitoringEnabled: competitor.monitoringEnabled
+      }
+    })
+
+    // Ordenar por total de cambios descendente
+    competitorsWithStats.sort((a, b) => b.totalChanges - a.totalChanges)
+
+    res.json({
+      success: true,
+      data: competitorsWithStats.slice(0, parseInt(limit))
+    })
+  } catch (error) {
+    logger.error('Error obteniendo competidores con más cambios:', error)
+    throw error
+  }
 }))
 
 /**
@@ -190,36 +421,50 @@ router.get('/recent-changes', asyncHandler(async (req, res) => {
     severity
   })
 
-  // TODO: Implementar consulta a base de datos
-  const recentChanges = [
-    {
-      id: '550e8400-e29b-41d4-a716-446655440001',
-      competitorId: '550e8400-e29b-41d4-a716-446655440001',
-      competitorName: 'TechCorp',
-      versionNumber: 23,
-      severity: 'high',
-      changePercentage: 12.5,
-      changeSummary: '5 líneas añadidas, 3 líneas eliminadas',
-      changeType: 'content_change',
-      detectedAt: new Date().toISOString()
-    },
-    {
-      id: '550e8400-e29b-41d4-a716-446655440002',
-      competitorId: '550e8400-e29b-41d4-a716-446655440002',
-      competitorName: 'StartupXYZ',
-      versionNumber: 18,
-      severity: 'medium',
-      changePercentage: 6.8,
-      changeSummary: '2 líneas añadidas, 1 línea eliminada',
-      changeType: 'price_change',
-      detectedAt: new Date(Date.now() - 3600000).toISOString()
+  try {
+    const whereClause = {
+      versionNumber: { [Op.gt]: 1 } // Excluir capturas iniciales
     }
-  ]
 
-  res.json({
-    success: true,
-    data: recentChanges.slice(0, parseInt(limit))
-  })
+    // Filtrar por severidad si se especifica
+    if (severity) {
+      whereClause.severity = severity
+    }
+
+    const recentChanges = await Snapshot.findAll({
+      include: [{
+        model: Competitor,
+        as: 'competitor',
+        where: { userId: req.user.id, isActive: true },
+        attributes: ['id', 'name', 'url']
+      }],
+      where: whereClause,
+      order: [['created_at', 'DESC']],
+      limit: parseInt(limit)
+    })
+
+    const formattedChanges = recentChanges.map(change => ({
+      id: change.id,
+      competitorId: change.competitorId,
+      competitorName: change.competitor?.name || 'Competidor desconocido',
+      competitorUrl: change.competitor?.url || '',
+      versionNumber: change.versionNumber,
+      severity: change.severity || 'medium',
+      changePercentage: change.changePercentage || 0,
+      changeCount: change.changeCount || 0,
+      changeSummary: change.changeSummary || 'Cambios detectados',
+      changeType: 'content_change', // TODO: Determinar tipo de cambio basado en el contenido
+      detectedAt: change.created_at
+    }))
+
+    res.json({
+      success: true,
+      data: formattedChanges
+    })
+  } catch (error) {
+    logger.error('Error obteniendo cambios recientes:', error)
+    throw error
+  }
 }))
 
 /**
