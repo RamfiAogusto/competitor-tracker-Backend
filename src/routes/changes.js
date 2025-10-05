@@ -43,7 +43,12 @@ router.get('/', asyncHandler(async (req, res) => {
     const offset = (parseInt(page) - 1) * limitNum
 
     // Construir condiciones WHERE
-    const whereConditions = {}
+    const whereConditions = {
+      // Excluir capturas iniciales (versionNumber = 1)
+      versionNumber: {
+        [require('sequelize').Op.gt]: 1
+      }
+    }
 
     // Filtro por competidor
     if (competitorId) {

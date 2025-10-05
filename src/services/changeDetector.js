@@ -51,8 +51,12 @@ class ChangeDetector {
         throw new AppError(`URL inválida: ${typeof url} - ${JSON.stringify(url)}`, 400)
       }
 
+      // Normalizar URL (agregar protocolo si no lo tiene)
+      const normalizedUrl = this.normalizeUrl(url)
+      logger.info(`URL normalizada: ${url} → ${normalizedUrl}`)
+
       // 1. Obtener HTML actual
-      const currentHtml = await this.getPageHTML(url, options)
+      const currentHtml = await this.getPageHTML(normalizedUrl, options)
       
       // 2. Obtener última versión
       const lastSnapshot = await this.getCurrentSnapshot(competitorId)
@@ -60,7 +64,7 @@ class ChangeDetector {
       if (!lastSnapshot) {
         // Primera captura - guardar versión completa
         logger.info(`Primera captura para competidor ${competitorId}`)
-        const initialVersion = await this.captureInitialVersion(competitorId, url, currentHtml)
+        const initialVersion = await this.captureInitialVersion(competitorId, normalizedUrl, currentHtml)
         
         // Retornar resultado para monitoreo manual
         if (options.isManualCheck) {
@@ -69,7 +73,7 @@ class ChangeDetector {
             alertCreated: false,
             snapshotId: initialVersion.id,
             changeCount: 0,
-            severity: 'none',
+            severity: 'low',
             changePercentage: 0,
             changeSummary: 'Primera captura - versión inicial guardada'
           }
@@ -136,7 +140,7 @@ class ChangeDetector {
             alertCreated: false,
             snapshotId: null,
             changeCount: 0,
-            severity: 'none',
+            severity: 'low',
             changePercentage: 0,
             changeSummary: 'No se detectaron cambios significativos'
           }
@@ -801,6 +805,21 @@ class ChangeDetector {
       logger.error('Error obteniendo snapshot actual:', error)
       return null
     }
+  }
+
+  /**
+   * Normalizar URL agregando protocolo si no lo tiene
+   */
+  normalizeUrl(url) {
+    if (!url) return url
+    
+    // Si ya tiene protocolo, devolver tal como está
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      return url
+    }
+    
+    // Agregar https:// por defecto
+    return `https://${url}`
   }
 }
 
