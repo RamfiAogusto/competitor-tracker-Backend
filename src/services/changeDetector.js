@@ -410,6 +410,13 @@ class ChangeDetector {
         changeSummary: 'Primera captura - versión inicial'
       })
 
+      // Actualizar contador de versiones del competidor
+      const { Competitor } = require('../models')
+      await Competitor.update(
+        { totalVersions: 1 },
+        { where: { id: competitorId } }
+      )
+
       logger.info(`Snapshot inicial creado para competidor ${competitorId}:`, {
         snapshotId: snapshot.id,
         versionNumber: snapshot.versionNumber,
@@ -497,7 +504,7 @@ class ChangeDetector {
       
       logger.info('📝 Diferencias: ' + changesWithModifications.length + ' cambios detectados')
       
-      // Filtrar cambios significativos (ignorar espacios en blanco y cambios muy pequeños)
+      // Filtrar cambios significativos (ignorar solo espacios/puntuación)
       const significantChanges = changes.filter(change => {
         if (change.added || change.removed) {
           const trimmedValue = change.value.trim()
@@ -508,24 +515,24 @@ class ChangeDetector {
             return false
           }
           
-          // Para cambios muy pequeños (< 10 caracteres), verificar si son significativos
-          if (changeLength < 10) {
-            // Solo considerar significativo si es una palabra completa o un número
-            const isWord = /^[a-zA-Z0-9áéíóúñÁÉÍÓÚÑ]+$/.test(trimmedValue)
-            const isNumber = /^\d+$/.test(trimmedValue)
-            const isSignificant = isWord || isNumber
-            
-            if (!isSignificant) {
-              logger.debug(`🔻 Cambio descartado (no significativo: "${trimmedValue}"):`, {
-                type: change.added ? 'added' : 'removed',
-                length: changeLength
-              })
+          // Ignorar solo puntuación o símbolos sin contenido
+          if (changeLength < 3) {
+            const isPunctuation = /^[.,;:!?¿¡()\[\]{}"'<>\/\\|@#$%^&*+=~`\-_]+$/.test(trimmedValue)
+            if (isPunctuation) {
+              logger.debug(`🔻 Descartado (solo puntuación): "${trimmedValue}"`)
+              return false
             }
-            
-            return isSignificant
           }
           
-          // Cambios >= 10 caracteres son significativos
+          // Aceptar cualquier cambio con letras o números
+          const hasContent = /[a-zA-Z0-9áéíóúñÁÉÍÓÚÑ]/.test(trimmedValue)
+          
+          if (!hasContent) {
+            logger.debug(`🔻 Descartado (sin contenido): "${trimmedValue}"`)
+            return false
+          }
+          
+          // Todos los cambios con contenido son significativos
           return true
         }
         return false
@@ -667,6 +674,16 @@ class ChangeDetector {
         changeType: changeType,
         changeSummary: comparison.changeSummary
       })
+
+      // Actualizar contador de versiones del competidor
+      const { Competitor } = require('../models')
+      await Competitor.update(
+        { 
+          totalVersions: newVersionNumber,
+          lastChangeAt: new Date()
+        },
+        { where: { id: competitorId } }
+      )
 
       logger.info(`Nueva versión creada para competidor ${competitorId}:`, {
         snapshotId: snapshot.id,
@@ -817,68 +834,61 @@ class ChangeDetector {
    * Generar resumen de cambios con contexto
    */
   generateChangeSummary (changes, fullHtml = '') {
-    const addedChanges = changes.filter(c => c.added)
-    const removedChanges = changes.filter(c => c.removed)
-    
     const summaryParts = []
-    let currentPosition = 0
     
     // Recorrer cambios en orden para obtener contexto
     for (let i = 0; i < changes.length; i++) {
       const change = changes[i]
       
-      if (change.removed) {
+      if (change.removed || change.added) {
         const text = change.value.trim()
-        if (text.length > 0) {
-          // Obtener contexto antes (del cambio anterior sin modificar)
-          let contextBefore = ''
-          if (i > 0 && !changes[i-1].added && !changes[i-1].removed) {
-            const prevText = changes[i-1].value
-            contextBefore = prevText.substring(Math.max(0, prevText.length - 40))
+        if (text.length === 0) continue
+        
+        // Obtener contexto antes y después del cambio
+        let contextBefore = ''
+        let contextAfter = ''
+        
+        // Contexto antes: buscar en el cambio anterior sin modificar
+        for (let j = i - 1; j >= 0; j--) {
+          if (!changes[j].added && !changes[j].removed) {
+            const prevText = changes[j].value
+            // Tomar últimas 50 caracteres del contexto anterior
+            contextBefore = prevText.substring(Math.max(0, prevText.length - 50))
+            break
           }
-          
-          // Obtener contexto después (del siguiente cambio sin modificar)
-          let contextAfter = ''
-          if (i < changes.length - 1 && !changes[i+1].added && !changes[i+1].removed) {
-            const nextText = changes[i+1].value
-            contextAfter = nextText.substring(0, Math.min(40, nextText.length))
-          }
-          
-          const cleanBefore = this.cleanHtmlForContext(contextBefore)
-          const cleanAfter = this.cleanHtmlForContext(contextAfter)
-          const cleanText = text.length > 30 ? text.substring(0, 27) + '...' : text
-          
-          summaryParts.push(`Eliminado "${cleanText}" → contexto: ...${cleanBefore}_[AQUÍ]_${cleanAfter}...`)
         }
-      } else if (change.added) {
-        const text = change.value.trim()
-        if (text.length > 0) {
-          // Obtener contexto antes
-          let contextBefore = ''
-          if (i > 0 && !changes[i-1].added && !changes[i-1].removed) {
-            const prevText = changes[i-1].value
-            contextBefore = prevText.substring(Math.max(0, prevText.length - 40))
+        
+        // Contexto después: buscar en el siguiente cambio sin modificar
+        for (let j = i + 1; j < changes.length; j++) {
+          if (!changes[j].added && !changes[j].removed) {
+            const nextText = changes[j].value
+            // Tomar primeros 50 caracteres del contexto siguiente
+            contextAfter = nextText.substring(0, Math.min(50, nextText.length))
+            break
           }
-          
-          // Obtener contexto después
-          let contextAfter = ''
-          if (i < changes.length - 1 && !changes[i+1].added && !changes[i+1].removed) {
-            const nextText = changes[i+1].value
-            contextAfter = nextText.substring(0, Math.min(40, nextText.length))
-          }
-          
-          const cleanBefore = this.cleanHtmlForContext(contextBefore)
-          const cleanAfter = this.cleanHtmlForContext(contextAfter)
-          const cleanText = text.length > 30 ? text.substring(0, 27) + '...' : text
-          
-          summaryParts.push(`Agregado "${cleanText}" → contexto: ...${cleanBefore}_[AQUÍ]_${cleanAfter}...`)
+        }
+        
+        // Limpiar contexto de HTML
+        const cleanBefore = this.cleanHtmlForContext(contextBefore)
+        const cleanAfter = this.cleanHtmlForContext(contextAfter)
+        const cleanText = text.length > 40 ? text.substring(0, 37) + '...' : text
+        
+        const type = change.added ? 'Agregado' : 'Eliminado'
+        
+        // Solo mostrar contexto si hay algo útil
+        if (cleanBefore || cleanAfter) {
+          summaryParts.push(`${type} "${cleanText}" en: "${cleanBefore}[${cleanText}]${cleanAfter}"`)
+        } else {
+          summaryParts.push(`${type} "${cleanText}"`)
         }
       }
     }
     
     // Si no hay resumen específico, usar resumen genérico
     if (summaryParts.length === 0) {
-      return `${addedChanges.length} adiciones, ${removedChanges.length} eliminaciones`
+      const added = changes.filter(c => c.added).length
+      const removed = changes.filter(c => c.removed).length
+      return `${added} adiciones, ${removed} eliminaciones`
     }
     
     // Limitar a los primeros 3 cambios para no saturar
@@ -899,14 +909,21 @@ class ChangeDetector {
     let clean = html
     
     // Remover tags HTML pero mantener el contenido
-    clean = clean.replace(/<[^>]+>/g, ' ')
+    clean = clean.replace(/<[^>]+>/g, '')
     
-    // Normalizar espacios
+    // Normalizar espacios pero mantener palabras
     clean = clean.replace(/\s+/g, ' ').trim()
     
-    // Truncar si es muy largo
-    if (clean.length > 80) {
-      clean = '...' + clean.substring(clean.length - 77)
+    // Si el contexto es muy corto, devolverlo tal cual
+    if (clean.length <= 40) {
+      return clean
+    }
+    
+    // Para contextos largos, tomar solo las últimas palabras (para before) o primeras (para after)
+    const words = clean.split(' ')
+    if (words.length > 6) {
+      // Tomar las últimas/primeras 6 palabras
+      return words.slice(-6).join(' ')
     }
     
     return clean
@@ -955,13 +972,15 @@ class ChangeDetector {
           
           if (changeLength === 0) return false
           
-          if (changeLength < 10) {
-            const isWord = /^[a-zA-Z0-9áéíóúñÁÉÍÓÚÑ]+$/.test(trimmedValue)
-            const isNumber = /^\d+$/.test(trimmedValue)
-            return isWord || isNumber
+          // Ignorar solo puntuación
+          if (changeLength < 3) {
+            const isPunctuation = /^[.,;:!?¿¡()\[\]{}"'<>\/\\|@#$%^&*+=~`\-_]+$/.test(trimmedValue)
+            if (isPunctuation) return false
           }
           
-          return true
+          // Aceptar cualquier cambio con letras o números
+          const hasContent = /[a-zA-Z0-9áéíóúñÁÉÍÓÚÑ]/.test(trimmedValue)
+          return hasContent
         }
         return false
       })
