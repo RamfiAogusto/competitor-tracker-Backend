@@ -301,9 +301,22 @@ router.get('/:id', validateCompetitor.getById, asyncHandler(async (req, res) => 
         userId: req.user.id,
         isActive: true
       },
-      attributes: {
-        exclude: ['userId'] // No exponer userId en la respuesta
-      }
+      attributes: [
+        'id', 'name', 'url', 'description', 'monitoringEnabled', 'checkInterval', 
+        'priority', 'lastCheckedAt', 'totalVersions', 'lastChangeAt', 'isActive', 
+        'created_at', 'updated_at'
+      ],
+      include: [
+        {
+          model: Snapshot,
+          as: 'lastSnapshot',
+          required: false,
+          where: {
+            isCurrent: true
+          },
+          attributes: ['id', 'versionNumber', 'changeCount', 'changePercentage', 'severity', 'changeType', 'created_at']
+        }
+      ]
     })
 
     if (!competitor) {
@@ -313,9 +326,27 @@ router.get('/:id', validateCompetitor.getById, asyncHandler(async (req, res) => 
       })
     }
 
+    // Transformar datos para incluir información de severidad
+    const competitorData = competitor.toJSON()
+    
+    // Agregar severidad y changeCount del último cambio
+    if (competitorData.lastSnapshot && competitorData.lastSnapshot.length > 0) {
+      const lastSnapshot = competitorData.lastSnapshot[0]
+      competitorData.severity = lastSnapshot.severity
+      competitorData.changeCount = lastSnapshot.changeCount
+      competitorData.lastChangeAt = lastSnapshot.created_at
+    } else {
+      competitorData.severity = 'low'
+      competitorData.changeCount = 0
+      competitorData.lastChangeAt = null
+    }
+
+    // Remover el array de snapshots de la respuesta
+    delete competitorData.lastSnapshot
+
     res.json({
       success: true,
-      data: competitor
+      data: competitorData
     })
   } catch (error) {
     logger.error('Error al obtener competidor:', error)
@@ -858,6 +889,7 @@ router.get('/:id/history', validateCompetitor.list, asyncHandler(async (req, res
         'changeCount',
         'changePercentage',
         'severity',
+        'changeType',
         'changeSummary',
         'created_at',
         'updated_at'

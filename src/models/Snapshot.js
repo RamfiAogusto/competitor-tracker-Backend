@@ -53,6 +53,11 @@ const Snapshot = sequelize.define('Snapshot', {
     type: DataTypes.ENUM('low', 'medium', 'high', 'critical'),
     defaultValue: 'low'
   },
+  changeType: {
+    type: DataTypes.ENUM('content', 'design', 'pricing', 'feature', 'other'),
+    defaultValue: 'other',
+    field: 'change_type'
+  },
   changeSummary: {
     type: DataTypes.TEXT,
     field: 'change_summary'
