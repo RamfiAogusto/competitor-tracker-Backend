@@ -153,12 +153,15 @@ class ChangeDetector {
         return null
       }
 
-      logger.info(`Cambios detectados para competidor ${competitorId}:`, {
+      logger.info(`✅ Cambios detectados:`, {
         changeCount: comparison.changeCount,
-        changePercentage: comparison.changePercentage,
-        severity: comparison.severity,
-        changeSummary: comparison.changeSummary
+        changePercentage: comparison.changePercentage.toFixed(4) + '%',
+        severity: comparison.severity
       })
+      
+      if (comparison.changeSummary) {
+        logger.info(`📍 Detalles: ${comparison.changeSummary}`)
+      }
 
       // 4. Crear nueva versión
       const newVersion = await this.createNewVersion(competitorId, comparison, options)
@@ -211,12 +214,7 @@ class ChangeDetector {
       }
 
       // Usar HeadlessX para obtener HTML real
-      logger.info(`🌐 Obteniendo HTML real de ${url}`, {
-        waitFor: options.waitFor || 2000,
-        viewport: options.viewport || { width: 1920, height: 1080 },
-        removeScripts: true,
-        timeout: options.timeout || 30000
-      })
+      logger.info(`🌐 Capturando ${url}...`)
       
       const result = await headlessXService.extractHTML(url, {
         waitFor: options.waitFor || 2000,
@@ -227,13 +225,7 @@ class ChangeDetector {
         fullPage: options.fullPage !== false
       })
 
-      logger.info(`✅ HTML obtenido exitosamente de ${url}`, {
-        htmlLength: result.html?.length || 0,
-        title: result.title,
-        contentLength: result.contentLength,
-        wasTimeout: result.wasTimeout,
-        htmlPreview: result.html?.substring(0, 200)
-      })
+      logger.info(`✅ Capturado: ${result.html?.length || 0} caracteres`)
 
       return result.html
     } catch (error) {
@@ -438,10 +430,7 @@ class ChangeDetector {
    */
   async compareVersions (lastSnapshot, currentHtml) {
     try {
-      logger.info('🔄 Iniciando comparación de versiones', {
-        snapshotId: lastSnapshot.id,
-        versionNumber: lastSnapshot.versionNumber
-      })
+      logger.info('🔄 Comparando versión #' + lastSnapshot.versionNumber)
       
       // Obtener HTML anterior (descomprimir si es necesario)
       const previousHtml = await this.getHTMLFromSnapshot(lastSnapshot)
@@ -450,27 +439,15 @@ class ChangeDetector {
       const prevHtmlStr = typeof previousHtml === 'string' ? previousHtml : String(previousHtml || '')
       const currHtmlStr = typeof currentHtml === 'string' ? currentHtml : String(currentHtml || '')
       
-      logger.info('📊 Tamaños de HTML originales:', {
-        previous: prevHtmlStr.length,
-        current: currHtmlStr.length,
-        difference: currHtmlStr.length - prevHtmlStr.length,
-        differencePercent: ((currHtmlStr.length - prevHtmlStr.length) / prevHtmlStr.length * 100).toFixed(2) + '%'
-      })
+      logger.info('📊 Tamaño: ' + prevHtmlStr.length + ' → ' + currHtmlStr.length + ' (' + 
+                  ((currHtmlStr.length - prevHtmlStr.length) / prevHtmlStr.length * 100).toFixed(1) + '% dif)')
       
       // Normalizar HTMLs para eliminar diferencias irrelevantes
-      logger.info('🔧 Normalizando HTML anterior...')
       const normalizedPrevHtml = this.normalizeHTML(prevHtmlStr)
-      
-      logger.info('🔧 Normalizando HTML actual...')
       const normalizedCurrHtml = this.normalizeHTML(currHtmlStr)
       
-      logger.info('📊 Tamaños después de normalización:', {
-        normalizedPrevious: normalizedPrevHtml.length,
-        normalizedCurrent: normalizedCurrHtml.length,
-        difference: normalizedCurrHtml.length - normalizedPrevHtml.length,
-        differencePercent: ((normalizedCurrHtml.length - normalizedPrevHtml.length) / normalizedPrevHtml.length * 100).toFixed(2) + '%',
-        areIdentical: normalizedPrevHtml === normalizedCurrHtml
-      })
+      const areIdentical = normalizedPrevHtml === normalizedCurrHtml
+      logger.info('📊 Después normalización: ' + (areIdentical ? '✅ idénticos' : '⚠️ diferentes'))
 
       // Guardar información detallada en archivo de debug
       await this.saveDebugInfo({
@@ -501,7 +478,6 @@ class ChangeDetector {
       
       // Si los HTMLs normalizados son idénticos, no hay cambios reales
       if (normalizedPrevHtml === normalizedCurrHtml) {
-        logger.info('✅ HTMLs normalizados son IDÉNTICOS - NO hay cambios reales')
         return {
           changes: [],
           changeCount: 0,
@@ -513,95 +489,87 @@ class ChangeDetector {
         }
       }
 
-      logger.info('⚠️  HTMLs normalizados son DIFERENTES - analizando cambios...')
+      logger.info('⚠️  Analizando diferencias...')
 
-      // Generar diferencias usando la librería 'diff' con HTMLs normalizados
-      const changes = diff.diffLines(normalizedPrevHtml, normalizedCurrHtml)
+      // Generar diferencias usando palabras para mayor precisión
+      const changes = diff.diffWords(normalizedPrevHtml, normalizedCurrHtml)
+      const changesWithModifications = changes.filter(c => c.added || c.removed)
       
-      logger.info('📝 Diferencias detectadas por diff:', {
-        totalChanges: changes.length,
-        added: changes.filter(c => c.added).length,
-        removed: changes.filter(c => c.removed).length,
-        unchanged: changes.filter(c => !c.added && !c.removed).length
-      })
+      logger.info('📝 Diferencias: ' + changesWithModifications.length + ' cambios detectados')
       
-      // Log de los primeros 5 cambios para análisis
-      logger.info('🔍 Primeros cambios detectados:')
-      changes.slice(0, 5).forEach((change, index) => {
-        if (change.added || change.removed) {
-          const type = change.added ? '➕ ADDED' : '➖ REMOVED'
-          const preview = change.value.trim().substring(0, 150)
-          const lines = change.count || 0
-          logger.info(`  ${index + 1}. ${type} (${lines} líneas, ${change.value.length} chars):`)
-          logger.info(`     "${preview}${change.value.length > 150 ? '...' : ''}"`)
-        }
-      })
-      
-      // Filtrar cambios significativos
+      // Filtrar cambios significativos (ignorar espacios en blanco y cambios muy pequeños)
       const significantChanges = changes.filter(change => {
         if (change.added || change.removed) {
-          const changeLength = change.value.trim().length
-          const isSignificant = changeLength >= this.config.significantChangeThreshold
+          const trimmedValue = change.value.trim()
+          const changeLength = trimmedValue.length
           
-          if (!isSignificant) {
-            logger.debug(`🔻 Cambio descartado (muy pequeño: ${changeLength} chars):`, {
-              type: change.added ? 'added' : 'removed',
-              content: change.value.trim().substring(0, 50)
-            })
+          // Ignorar cambios que son solo espacios en blanco
+          if (changeLength === 0) {
+            return false
           }
           
-          return isSignificant
+          // Para cambios muy pequeños (< 10 caracteres), verificar si son significativos
+          if (changeLength < 10) {
+            // Solo considerar significativo si es una palabra completa o un número
+            const isWord = /^[a-zA-Z0-9áéíóúñÁÉÍÓÚÑ]+$/.test(trimmedValue)
+            const isNumber = /^\d+$/.test(trimmedValue)
+            const isSignificant = isWord || isNumber
+            
+            if (!isSignificant) {
+              logger.debug(`🔻 Cambio descartado (no significativo: "${trimmedValue}"):`, {
+                type: change.added ? 'added' : 'removed',
+                length: changeLength
+              })
+            }
+            
+            return isSignificant
+          }
+          
+          // Cambios >= 10 caracteres son significativos
+          return true
         }
         return false
       })
 
-      logger.info('📊 Filtrado de cambios significativos:', {
-        totalChanges: changes.length,
-        significantChanges: significantChanges.length,
-        filtered: changes.length - significantChanges.length,
-        threshold: this.config.significantChangeThreshold + ' caracteres'
-      })
-
-      // Calcular métricas
-      const totalLines = normalizedCurrHtml.split('\n').length
-      const changedLines = significantChanges.reduce((acc, change) => {
-        return acc + (change.added ? change.count : 0) + (change.removed ? change.count : 0)
+      // Calcular métricas basadas en caracteres (más preciso)
+      const totalChars = normalizedCurrHtml.length
+      const changedChars = significantChanges.reduce((acc, change) => {
+        return acc + change.value.length
       }, 0)
 
-      const changePercentage = totalLines > 0 ? (changedLines / totalLines) * 100 : 0
+      const changePercentage = totalChars > 0 ? (changedChars / totalChars) * 100 : 0
       const severity = this.calculateSeverity(changePercentage, significantChanges)
 
-      logger.info('📊 Métricas finales de comparación:', {
-        totalLines,
-        changedLines,
-        changePercentage: changePercentage.toFixed(2) + '%',
-        severity,
-        significantChanges: significantChanges.length,
-        normalizationApplied: true
-      })
-
-      // Log detallado de cambios significativos
-      if (significantChanges.length > 0) {
-        logger.info('⚠️  Cambios SIGNIFICATIVOS detectados:')
+      // Generar resumen detallado con contexto
+      const changeSummary = this.generateChangeSummary(significantChanges, currHtmlStr)
+      
+      logger.info('📊 Análisis: ' + significantChanges.length + ' cambios, ' + 
+                  changePercentage.toFixed(4) + '% modificado, severidad: ' + severity)
+      
+      if (changeSummary && changeSummary.length < 200) {
+        logger.info('📍 ' + changeSummary)
+      }
+      
+      // Log de cambios solo si son pocos (para no llenar logs)
+      if (significantChanges.length > 0 && significantChanges.length <= 5) {
         significantChanges.forEach((change, index) => {
-          const type = change.added ? '➕ ADDED' : '➖ REMOVED'
-          const preview = change.value.trim().substring(0, 100)
-          const lines = change.count || 0
-          logger.info(`  ${index + 1}. ${type} (${lines} líneas):`)
-          logger.info(`     "${preview}${change.value.length > 100 ? '...' : ''}"`)
+          const type = change.added ? '➕' : '➖'
+          const preview = change.value.trim().substring(0, 50)
+          logger.info(`  ${type} "${preview}${change.value.length > 50 ? '...' : ''}"`)
         })
-      } else {
-        logger.info('✅ No se detectaron cambios SIGNIFICATIVOS después del filtrado')
+      } else if (significantChanges.length > 5) {
+        logger.info('  (Muchos cambios - ver archivo de debug para detalles)')
       }
 
       return {
         changes: significantChanges,
         changeCount: significantChanges.length,
         changePercentage: changePercentage,
-        totalLines: totalLines,
-        changedLines: changedLines,
+        totalLines: totalChars, // Ahora representa caracteres totales
+        changedLines: changedChars, // Ahora representa caracteres cambiados
         severity: severity,
         currentHtml: currHtmlStr,
+        changeSummary: changeSummary,
         normalizedComparison: true
       }
     } catch (error) {
@@ -775,37 +743,17 @@ class ChangeDetector {
    */
   async getHTMLFromSnapshot (snapshot) {
     if (snapshot.fullHtml) {
-      // HTML siempre sin comprimir ahora - usar directamente
       const html = snapshot.fullHtml
-      
-      logger.info('📦 HTML obtenido del snapshot (sin comprimir):', {
-        snapshotId: snapshot.id,
-        versionNumber: snapshot.versionNumber,
-        htmlLength: html.length,
-        htmlType: typeof html,
-        isString: typeof html === 'string',
-        htmlPreview: html.substring(0, 100) + '...'
-      })
-      
-      // Asegurar que es string
       const htmlStr = typeof html === 'string' ? html : String(html || '')
       
       if (htmlStr.length === 0) {
-        logger.warn('⚠️  HTML del snapshot está vacío!', {
-          snapshotId: snapshot.id,
-          versionNumber: snapshot.versionNumber
-        })
+        logger.warn('⚠️  HTML del snapshot #' + snapshot.versionNumber + ' está vacío')
       }
       
       return htmlStr
     }
 
-    logger.warn('⚠️  Snapshot no tiene fullHtml, intentando reconstruir desde diffs:', {
-      snapshotId: snapshot.id,
-      versionNumber: snapshot.versionNumber
-    })
-    
-    // Reconstruir desde diferencias
+    logger.warn('⚠️  Snapshot #' + snapshot.versionNumber + ' sin HTML, reconstruyendo...')
     return await this.reconstructHTMLFromDiffs(snapshot.id)
   }
 
@@ -825,16 +773,20 @@ class ChangeDetector {
 
   /**
    * Verificar si hay cambios significativos
+   * Un cambio es significativo si:
+   * - Tiene al menos 1 palabra/elemento cambiado Y
+   * - El porcentaje es >= 0.001% (muy bajo para captar cambios pequeños)
    */
   isSignificantChange (comparison) {
-    const thresholdPercentage = this.config.changeThreshold * 100
-    const isSignificant = comparison.changePercentage >= thresholdPercentage && comparison.changeCount > 0
+    const minChangePercentage = 0.001 // 0.001% = muy sensible
+    const minChangeCount = 1 // Al menos 1 cambio
     
-    logger.info('🔍 Verificando si los cambios son significativos:', {
-      changePercentage: comparison.changePercentage.toFixed(2) + '%',
+    const isSignificant = comparison.changePercentage >= minChangePercentage && 
+                          comparison.changeCount >= minChangeCount
+    
+    logger.info('🔍 Verificando cambios:', {
+      changePercentage: comparison.changePercentage.toFixed(4) + '%',
       changeCount: comparison.changeCount,
-      thresholdPercentage: thresholdPercentage + '%',
-      thresholdCount: 0,
       isSignificant: isSignificant ? '✅ SÍ' : '❌ NO',
       severity: comparison.severity
     })
@@ -844,22 +796,120 @@ class ChangeDetector {
 
   /**
    * Calcular severidad del cambio
+   * Ajustado para comparación a nivel de palabras/caracteres
    */
   calculateSeverity (changePercentage, changes) {
-    if (changePercentage > 20 || changes.length > 50) return 'critical'
-    if (changePercentage > 10 || changes.length > 20) return 'high'
-    if (changePercentage > 5 || changes.length > 10) return 'medium'
+    // Umbrales ajustados para comparación basada en caracteres
+    // (más realistas que comparación por líneas)
+    if (changePercentage > 5 || changes.length > 100) {
+      return 'critical'
+    }
+    if (changePercentage > 2 || changes.length > 50) {
+      return 'high'
+    }
+    if (changePercentage > 0.5 || changes.length > 20) {
+      return 'medium'
+    }
     return 'low'
   }
 
   /**
-   * Generar resumen de cambios
+   * Generar resumen de cambios con contexto
    */
-  generateChangeSummary (changes) {
-    const addedLines = changes.filter(c => c.added).length
-    const removedLines = changes.filter(c => c.removed).length
+  generateChangeSummary (changes, fullHtml = '') {
+    const addedChanges = changes.filter(c => c.added)
+    const removedChanges = changes.filter(c => c.removed)
     
-    return `${addedLines} líneas añadidas, ${removedLines} líneas eliminadas`
+    const summaryParts = []
+    let currentPosition = 0
+    
+    // Recorrer cambios en orden para obtener contexto
+    for (let i = 0; i < changes.length; i++) {
+      const change = changes[i]
+      
+      if (change.removed) {
+        const text = change.value.trim()
+        if (text.length > 0) {
+          // Obtener contexto antes (del cambio anterior sin modificar)
+          let contextBefore = ''
+          if (i > 0 && !changes[i-1].added && !changes[i-1].removed) {
+            const prevText = changes[i-1].value
+            contextBefore = prevText.substring(Math.max(0, prevText.length - 40))
+          }
+          
+          // Obtener contexto después (del siguiente cambio sin modificar)
+          let contextAfter = ''
+          if (i < changes.length - 1 && !changes[i+1].added && !changes[i+1].removed) {
+            const nextText = changes[i+1].value
+            contextAfter = nextText.substring(0, Math.min(40, nextText.length))
+          }
+          
+          const cleanBefore = this.cleanHtmlForContext(contextBefore)
+          const cleanAfter = this.cleanHtmlForContext(contextAfter)
+          const cleanText = text.length > 30 ? text.substring(0, 27) + '...' : text
+          
+          summaryParts.push(`Eliminado "${cleanText}" → contexto: ...${cleanBefore}_[AQUÍ]_${cleanAfter}...`)
+        }
+      } else if (change.added) {
+        const text = change.value.trim()
+        if (text.length > 0) {
+          // Obtener contexto antes
+          let contextBefore = ''
+          if (i > 0 && !changes[i-1].added && !changes[i-1].removed) {
+            const prevText = changes[i-1].value
+            contextBefore = prevText.substring(Math.max(0, prevText.length - 40))
+          }
+          
+          // Obtener contexto después
+          let contextAfter = ''
+          if (i < changes.length - 1 && !changes[i+1].added && !changes[i+1].removed) {
+            const nextText = changes[i+1].value
+            contextAfter = nextText.substring(0, Math.min(40, nextText.length))
+          }
+          
+          const cleanBefore = this.cleanHtmlForContext(contextBefore)
+          const cleanAfter = this.cleanHtmlForContext(contextAfter)
+          const cleanText = text.length > 30 ? text.substring(0, 27) + '...' : text
+          
+          summaryParts.push(`Agregado "${cleanText}" → contexto: ...${cleanBefore}_[AQUÍ]_${cleanAfter}...`)
+        }
+      }
+    }
+    
+    // Si no hay resumen específico, usar resumen genérico
+    if (summaryParts.length === 0) {
+      return `${addedChanges.length} adiciones, ${removedChanges.length} eliminaciones`
+    }
+    
+    // Limitar a los primeros 3 cambios para no saturar
+    if (summaryParts.length > 3) {
+      return summaryParts.slice(0, 3).join('; ') + ` (y ${summaryParts.length - 3} más)`
+    }
+    
+    return summaryParts.join('; ')
+  }
+  
+  
+  /**
+   * Limpiar HTML para mostrar contexto legible
+   */
+  cleanHtmlForContext(html) {
+    if (!html) return ''
+    
+    let clean = html
+    
+    // Remover tags HTML pero mantener el contenido
+    clean = clean.replace(/<[^>]+>/g, ' ')
+    
+    // Normalizar espacios
+    clean = clean.replace(/\s+/g, ' ').trim()
+    
+    // Truncar si es muy largo
+    if (clean.length > 80) {
+      clean = '...' + clean.substring(clean.length - 77)
+    }
+    
+    return clean
   }
 
   /**
@@ -896,29 +946,39 @@ class ChangeDetector {
    */
   generateDiff (oldHtml, newHtml) {
     try {
-      const changes = diff.diffLines(oldHtml, newHtml)
+      const changes = diff.diffWords(oldHtml, newHtml)
       
       const significantChanges = changes.filter(change => {
         if (change.added || change.removed) {
-          const changeLength = change.value.trim().length
-          return changeLength >= this.config.significantChangeThreshold
+          const trimmedValue = change.value.trim()
+          const changeLength = trimmedValue.length
+          
+          if (changeLength === 0) return false
+          
+          if (changeLength < 10) {
+            const isWord = /^[a-zA-Z0-9áéíóúñÁÉÍÓÚÑ]+$/.test(trimmedValue)
+            const isNumber = /^\d+$/.test(trimmedValue)
+            return isWord || isNumber
+          }
+          
+          return true
         }
         return false
       })
 
-      const totalLines = newHtml.split('\n').length
-      const changedLines = significantChanges.reduce((acc, change) => {
-        return acc + (change.added ? change.count : 0) + (change.removed ? change.count : 0)
+      const totalChars = newHtml.length
+      const changedChars = significantChanges.reduce((acc, change) => {
+        return acc + change.value.length
       }, 0)
 
-      const changePercentage = (changedLines / totalLines) * 100
+      const changePercentage = (changedChars / totalChars) * 100
 
       return {
         changes: significantChanges,
         changeCount: significantChanges.length,
         changePercentage: changePercentage,
-        totalLines: totalLines,
-        changedLines: changedLines,
+        totalLines: totalChars,
+        changedLines: changedChars,
         severity: this.calculateSeverity(changePercentage, significantChanges),
         summary: this.generateChangeSummary(significantChanges)
       }
@@ -1007,30 +1067,21 @@ class ChangeDetector {
   normalizeHTML(html) {
     if (!html || typeof html !== 'string') return ''
     
-    logger.info('🔍 Iniciando normalización de HTML', {
-      originalLength: html.length,
-      firstChars: html.substring(0, 200)
-    })
-    
     let normalized = html
     
     // 1. Remover scripts completos (pueden cambiar entre cargas)
-    const scriptsRemoved = (normalized.match(/<script\b[^>]*>[\s\S]*?<\/script>/gi) || []).length
     normalized = normalized.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
-    logger.info('✂️  Scripts removidos:', scriptsRemoved)
     
     // 2. Remover noscript tags
     normalized = normalized.replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, '')
     
     // 3. Remover comentarios HTML
-    const commentsRemoved = (normalized.match(/<!--[\s\S]*?-->/g) || []).length
     normalized = normalized.replace(/<!--[\s\S]*?-->/g, '')
-    logger.info('✂️  Comentarios removidos:', commentsRemoved)
     
     // 4. Remover timestamps dinámicos (múltiples formatos)
     normalized = normalized.replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/g, '[TIMESTAMP]')
     normalized = normalized.replace(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/g, '[TIMESTAMP]')
-    normalized = normalized.replace(/\d{13,}/g, '[UNIX_TIMESTAMP]') // Unix timestamps
+    normalized = normalized.replace(/\d{13,}/g, '[UNIX_TIMESTAMP]')
     
     // 5. Remover IDs únicos y hashes (React, Next.js, etc.)
     normalized = normalized.replace(/__className_[a-f0-9]+/g, '__className_[ID]')
@@ -1039,9 +1090,7 @@ class ChangeDetector {
     normalized = normalized.replace(/class="[^"]*[a-f0-9]{8,}[^"]*"/gi, 'class="[HASH_CLASS]"')
     
     // 6. Remover TODOS los atributos data-* (suelen ser dinámicos)
-    const dataAttrsRemoved = (normalized.match(/\s*data-[a-z0-9-]+="[^"]*"/gi) || []).length
     normalized = normalized.replace(/\s*data-[a-z0-9-]+="[^"]*"/gi, '')
-    logger.info('✂️  Atributos data-* removidos:', dataAttrsRemoved)
     
     // 7. Remover atributos aria-* dinámicos
     normalized = normalized.replace(/\s*aria-describedby="[^"]*"/gi, '')
@@ -1049,9 +1098,7 @@ class ChangeDetector {
     normalized = normalized.replace(/\s*aria-controls="[^"]*"/gi, '')
     
     // 8. Remover atributos de estilo inline (pueden variar)
-    const stylesRemoved = (normalized.match(/\s*style="[^"]*"/gi) || []).length
     normalized = normalized.replace(/\s*style="[^"]*"/gi, '')
-    logger.info('✂️  Atributos style removidos:', stylesRemoved)
     
     // 9. Normalizar espacios en blanco
     normalized = normalized.replace(/\s+/g, ' ')
@@ -1073,18 +1120,9 @@ class ChangeDetector {
     normalized = normalized.trim()
     
     const reduction = html.length - normalized.length
-    const reductionPercent = (reduction / html.length * 100).toFixed(2)
+    const reductionPercent = (reduction / html.length * 100).toFixed(1)
     
-    logger.info('✅ Normalización completada:', {
-      originalLength: html.length,
-      normalizedLength: normalized.length,
-      reduction: reduction,
-      reductionPercent: `${reductionPercent}%`,
-      scriptsRemoved,
-      commentsRemoved,
-      dataAttrsRemoved,
-      stylesRemoved
-    })
+    logger.info('✅ Normalizado: ' + html.length + ' → ' + normalized.length + ' (' + reductionPercent + '% reducido)')
     
     return normalized
   }
@@ -1127,10 +1165,7 @@ class ChangeDetector {
       // Guardar archivo principal de debug
       await fs.writeFile(debugFile, JSON.stringify(debugLogs, null, 2))
       
-      logger.info('📝 Debug info guardado en archivo:', {
-        file: debugFile,
-        totalLogs: debugLogs.length
-      })
+      logger.debug('📝 Debug guardado (' + debugLogs.length + ' logs)')
       
       // Guardar muestras de HTML completas para análisis detallado
       if (debugData.originalHtml || debugData.normalizedHtml) {
@@ -1140,41 +1175,27 @@ class ChangeDetector {
         if (debugData.originalHtml?.previousFull) {
           const prevOriginalFile = path.join(debugDir, `html-previous-original-${timestamp}.html`)
           await fs.writeFile(prevOriginalFile, debugData.originalHtml.previousFull || '')
-          logger.info('📄 HTML anterior original completo guardado:', {
-            file: prevOriginalFile,
-            size: debugData.originalHtml.previousFull.length
-          })
         }
         
         // Guardar HTML actual original completo
         if (debugData.originalHtml?.currentFull) {
           const currOriginalFile = path.join(debugDir, `html-current-original-${timestamp}.html`)
           await fs.writeFile(currOriginalFile, debugData.originalHtml.currentFull || '')
-          logger.info('📄 HTML actual original completo guardado:', {
-            file: currOriginalFile,
-            size: debugData.originalHtml.currentFull.length
-          })
         }
         
         // Guardar HTML anterior normalizado completo
         if (debugData.normalizedHtml?.previousFull) {
           const prevNormalizedFile = path.join(debugDir, `html-previous-normalized-${timestamp}.html`)
           await fs.writeFile(prevNormalizedFile, debugData.normalizedHtml.previousFull || '')
-          logger.info('📄 HTML anterior normalizado completo guardado:', {
-            file: prevNormalizedFile,
-            size: debugData.normalizedHtml.previousFull.length
-          })
         }
         
         // Guardar HTML actual normalizado completo
         if (debugData.normalizedHtml?.currentFull) {
           const currNormalizedFile = path.join(debugDir, `html-current-normalized-${timestamp}.html`)
           await fs.writeFile(currNormalizedFile, debugData.normalizedHtml.currentFull || '')
-          logger.info('📄 HTML actual normalizado completo guardado:', {
-            file: currNormalizedFile,
-            size: debugData.normalizedHtml.currentFull.length
-          })
         }
+        
+        logger.debug('📄 4 archivos HTML guardados en logs/')
         
         // Crear archivo de resumen de comparación
         const summaryFile = path.join(debugDir, `comparison-summary-${timestamp}.txt`)
@@ -1209,7 +1230,6 @@ NOTA: Los archivos normalizados son los que se usan para detectar cambios.
       Si son idénticos, NO se reportan cambios aunque los originales difieran.
 `
         await fs.writeFile(summaryFile, summary)
-        logger.info('📄 Resumen de comparación guardado:', summaryFile)
       }
       
     } catch (error) {
@@ -1249,7 +1269,7 @@ NOTA: Los archivos normalizados son los que se usan para detectar cambios.
         changePercentage: comparison.changePercentage,
         severity: comparison.severity,
         versionNumber: newVersion.version_number,
-        changeSummary: this.generateChangeSummary(comparison.changes),
+        changeSummary: comparison.changeSummary || this.generateChangeSummary(comparison.changes),
         affectedSections: this.extractAffectedSections(comparison.changes)
       })
 
