@@ -9,7 +9,7 @@ const { asyncHandler } = require('../middleware/errorHandler')
 const headlessXService = require('../services/headlessXService')
 const logger = require('../utils/logger')
 const { Competitor, Snapshot, Alert } = require('../models')
-const { Op } = require('sequelize')
+const { Op, Sequelize } = require('sequelize')
 
 /**
  * GET /api/dashboard/overview
@@ -67,9 +67,18 @@ router.get('/overview', asyncHandler(async (req, res) => {
 
     // Obtener última verificación
     const lastCheck = await Competitor.findOne({
-      where: { userId: req.user.id, isActive: true },
+      where: { 
+        userId: req.user.id, 
+        isActive: true,
+        lastCheckedAt: { [Op.ne]: null } // Filtrar solo los que tienen fecha
+      },
       order: [['lastCheckedAt', 'DESC']],
-      attributes: ['lastCheckedAt']
+      attributes: ['lastCheckedAt', 'name']
+    })
+    
+    logger.info('Última verificación encontrada:', {
+      lastCheck: lastCheck?.lastCheckedAt,
+      competitor: lastCheck?.name
     })
 
     // Obtener cambios recientes para actividad reciente
@@ -327,25 +336,20 @@ router.get('/stats', asyncHandler(async (req, res) => {
 router.get('/competitors/top-changes', asyncHandler(async (req, res) => {
   const { limit = 10, period = '30d' } = req.query
 
-  logger.info('Obteniendo competidores con más cambios', {
+  logger.info('Obteniendo top competitors', {
     userId: req.user.id,
     limit,
     period
   })
 
   try {
-    // Obtener competidores con conteo de cambios
-    const topCompetitors = await Competitor.findAll({
+    // Calcular fecha de inicio según el período
+    const periodDays = parseInt(period.replace('d', ''))
+    const periodStart = new Date(Date.now() - periodDays * 24 * 60 * 60 * 1000)
+
+    // Obtener todos los competidores del usuario
+    const competitors = await Competitor.findAll({
       where: { userId: req.user.id, isActive: true },
-      include: [{
-        model: Snapshot,
-        as: 'snapshots',
-        where: {
-          versionNumber: { [Op.gt]: 1 } // Excluir capturas iniciales
-        },
-        attributes: ['severity', 'created_at'],
-        required: false
-      }],
       attributes: [
         'id',
         'name', 
@@ -353,33 +357,63 @@ router.get('/competitors/top-changes', asyncHandler(async (req, res) => {
         'priority',
         'monitoringEnabled',
         'lastCheckedAt',
-        'lastChangeAt'
+        'lastChangeAt',
+        'totalVersions'
       ]
     })
 
-    // Procesar datos para obtener estadísticas
-    const competitorsWithStats = topCompetitors.map(competitor => {
-      const changes = competitor.snapshots || []
-      const totalChanges = changes.length
-      const criticalChanges = changes.filter(s => s.severity === 'critical').length
-      const highChanges = changes.filter(s => s.severity === 'high').length
-      
+    // Para cada competidor, contar cambios en el período
+    const competitorsWithStats = await Promise.all(competitors.map(async (competitor) => {
+      // Contar total de cambios (excluyendo versión inicial)
+      const totalChanges = await Snapshot.count({
+        where: { 
+          competitorId: competitor.id,
+          versionNumber: { [Op.gt]: 1 }
+        }
+      })
+
+      // Contar cambios críticos
+      const criticalChanges = await Snapshot.count({
+        where: { 
+          competitorId: competitor.id,
+          versionNumber: { [Op.gt]: 1 },
+          severity: 'critical'
+        }
+      })
+
+      // Contar cambios high
+      const highChanges = await Snapshot.count({
+        where: { 
+          competitorId: competitor.id,
+          versionNumber: { [Op.gt]: 1 },
+          severity: 'high'
+        }
+      })
+
       // Obtener último cambio
-      const lastChange = changes.length > 0 
-        ? changes.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0].created_at
-        : null
+      const lastSnapshot = await Snapshot.findOne({
+        where: { 
+          competitorId: competitor.id,
+          versionNumber: { [Op.gt]: 1 }
+        },
+        order: [['created_at', 'DESC']],
+        attributes: ['created_at']
+      })
 
-      // Calcular tendencia (simplificado)
-      const recentChanges = changes.filter(s => {
-        const changeDate = new Date(s.created_at)
-        const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
-        return changeDate > weekAgo
-      }).length
+      // Calcular cambios recientes (última semana)
+      const recentChanges = await Snapshot.count({
+        where: { 
+          competitorId: competitor.id,
+          versionNumber: { [Op.gt]: 1 },
+          created_at: { [Op.gte]: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) }
+        }
+      })
 
+      // Calcular tendencia
       const olderChanges = totalChanges - recentChanges
       let changeTrend = 'stable'
-      if (recentChanges > olderChanges) changeTrend = 'increasing'
-      else if (recentChanges < olderChanges) changeTrend = 'decreasing'
+      if (recentChanges > olderChanges && recentChanges > 0) changeTrend = 'increasing'
+      else if (recentChanges < olderChanges && olderChanges > 0) changeTrend = 'decreasing'
 
       return {
         id: competitor.id,
@@ -388,22 +422,35 @@ router.get('/competitors/top-changes', asyncHandler(async (req, res) => {
         totalChanges,
         criticalChanges,
         highChanges,
-        lastChange,
+        lastChange: lastSnapshot ? lastSnapshot.created_at : null,
         changeTrend,
         priority: competitor.priority || 'medium',
         monitoringEnabled: competitor.monitoringEnabled
       }
-    })
+    }))
 
-    // Ordenar por total de cambios descendente
-    competitorsWithStats.sort((a, b) => b.totalChanges - a.totalChanges)
+    // Ordenar por total de cambios descendente y filtrar los que tienen cambios
+    const sortedCompetitors = competitorsWithStats
+      .filter(c => c.totalChanges > 0) // Solo mostrar competidores con cambios
+      .sort((a, b) => b.totalChanges - a.totalChanges)
+      .slice(0, parseInt(limit))
+
+    logger.info('Top competitors obtenidos exitosamente', {
+      userId: req.user.id,
+      totalCompetitors: competitors.length,
+      withChanges: sortedCompetitors.length,
+      topCompetitors: sortedCompetitors.slice(0, 3).map(c => ({
+        name: c.name,
+        totalChanges: c.totalChanges
+      }))
+    })
 
     res.json({
       success: true,
-      data: competitorsWithStats.slice(0, parseInt(limit))
+      data: sortedCompetitors
     })
   } catch (error) {
-    logger.error('Error obteniendo competidores con más cambios:', error)
+    logger.error('Error obteniendo top competitors:', error)
     throw error
   }
 }))
