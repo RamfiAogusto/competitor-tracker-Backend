@@ -16,48 +16,98 @@ Las empresas **NO** pagan por "saber que cambió algo en HTML". Pagan por:
 
 ## 💡 Funcionalidades "WOW" a Implementar
 
-### 1. 🎯 Extractor Inteligente de Información Comercial
+### 1. 🎯 Identificador y Extractor Inteligente de Secciones Clave
 
-**Qué hace**: No solo detectar cambios, sino extraer automáticamente información comercial clave.
+**Qué hace**: Identifica automáticamente TODAS las secciones importantes de una web competidora y extrae información estructurada de cada una.
 
-**Features a extraer**:
-- **Precios y planes** de competidores
-- **Features/características** que ofrecen  
-- **Propuestas de valor** (headlines principales)
-- **Call-to-actions** y estrategia de conversión
-- **Tecnologías detectadas** (frameworks, herramientas)
-- **Keywords SEO** en meta tags
-- **Testimonios** y social proof
-- **Partners** y logos de clientes
+> 📘 **Documentación Técnica Completa**: Ver [SISTEMA_EXTRACCION_SECCIONES.md](./SISTEMA_EXTRACCION_SECCIONES.md) para:
+> - Arquitectura del sistema de secciones
+> - Código de implementación detallado
+> - Estructura de base de datos
+> - API endpoints y componentes frontend
+> - Herramientas especializadas por tipo de sección
 
-**Valor para el usuario**: Dashboard donde ves precios de todos tus competidores en tiempo real, sin revisar manualmente cada sitio.
+#### 📍 Secciones que Identifica Automáticamente:
 
-**Implementación técnica**:
-```javascript
-// Ejemplo de estructura de datos
-{
-  competitor: "Competitor A",
-  extracted_data: {
-    pricing: [
-      { plan: "Basic", price: "$29/mo", features: [...] },
-      { plan: "Pro", price: "$99/mo", features: [...] }
-    ],
-    main_headline: "The best tool for...",
-    cta_buttons: ["Start Free Trial", "Book Demo"],
-    technologies: ["React", "Stripe", "Intercom"],
-    keywords: ["project management", "collaboration"],
-    social_proof: {
-      testimonial_count: 15,
-      client_logos: ["Microsoft", "Google"]
-    }
-  },
-  last_updated: "2025-10-11T00:00:00Z"
-}
+1. **💰 Pricing/Planes**
+   - Detecta tabla de precios
+   - Extrae: nombre del plan, precio, features incluidas
+   - Identifica cambios de precio automáticamente
+
+2. **⭐ Reviews/Comentarios/Valoraciones**
+   - Extrae comentarios de usuarios
+   - Analiza sentimiento (positivo/negativo)
+   - **🔥 CLAVE**: Detecta quejas recurrentes con IA
+   - Identifica patrones: "15 usuarios se quejan de soporte lento"
+
+3. **✨ Features/Características**
+   - Lista de funcionalidades del producto
+   - Features nuevas vs. existentes
+   - Comparación con tus features
+
+4. **🎯 Hero/Propuesta de Valor**
+   - Headlines principales
+   - Messaging de posicionamiento
+   - Value propositions
+
+5. **🤝 Social Proof**
+   - Testimonios de clientes
+   - Logos de empresas que usan el producto
+   - Métricas ("10,000+ usuarios")
+   - Case studies
+
+6. **📞 CTAs/Conversión**
+   - Botones principales de acción
+   - Ofertas (free trial, demos)
+   - Estrategia de conversión
+
+7. **👥 Team/Equipo**
+   - Nuevas contrataciones
+   - Expansión del equipo
+   - Expertise destacado
+
+8. **📰 Blog/Actualizaciones**
+   - Últimos posts
+   - Temas que cubren
+   - Frecuencia de publicación
+
+9. **🔧 Tecnologías**
+   - Stack técnico detectado
+   - Integraciones disponibles
+   - APIs y herramientas
+
+**Valor para el usuario**: Dashboard completo donde ves TODO lo importante de tus competidores sin revisar manualmente cada sitio.
+
+---
+
+### 2. 🔍 Análisis Inteligente de Reviews y Opiniones de Usuarios
+
+**Qué hace**: Analiza reviews, comentarios y valoraciones de los competidores para detectar **quejas recurrentes** y **oportunidades competitivas**.
+
+> 📘 **Ver código e implementación completa en**: [SISTEMA_EXTRACCION_SECCIONES.md](./SISTEMA_EXTRACCION_SECCIONES.md#2-⭐-reviews-extractor)
+
+#### 🎯 Capacidades:
+
+- **Detección de patrones de quejas** (ej: "15 usuarios se quejan de soporte lento")
+- **Análisis de sentimiento** (positivo/neutral/negativo)
+- **Fuentes múltiples**: Sitio web + G2 + Capterra + TrustPilot
+- **Oportunidades competitivas**: Si ellos tienen problema X y tú lo haces bien
+- **Alertas**: Notifica si aumentan quejas sobre un tema
+
+#### 💎 Valor Real:
+
+```
+Caso: Competidor tiene 15 quejas de "soporte lento"
+
+Sistema te dice:
+→ Esta es tu OPORTUNIDAD #1 si tu soporte es rápido
+→ Acciones: Landing comparativa, badge "Soporte 24/7", email campaign
+→ Prioridad: URGENTE
 ```
 
 ---
 
-### 2. 🤖 Análisis de Cambios con IA (GPT-4)
+### 3. 🤖 Análisis de Cambios con IA (GPT-4)
 
 **Qué hace**: Usa la API de OpenAI para analizar cambios y generar insights.
 
@@ -255,6 +305,106 @@ agresivo de adquisición: 2 features nuevas + bajos precios
 
 ---
 
+## 🔥 SISTEMA INTEGRADO: Competitive Intelligence 360°
+
+**Cómo Funcionan Juntas Todas las Funcionalidades**
+
+### El Flow Completo:
+
+```
+1️⃣ MONITOREO AUTOMÁTICO
+   └─> Sistema captura el sitio del competidor cada X horas
+
+2️⃣ IDENTIFICACIÓN DE SECCIONES
+   └─> Detecta automáticamente: Pricing, Reviews, Features, etc.
+
+3️⃣ EXTRACCIÓN DE DATOS
+   └─> Estructura la información de cada sección
+
+4️⃣ ANÁLISIS CON IA
+   ├─> Analiza reviews para detectar quejas recurrentes
+   ├─> Identifica cambios de precio/features
+   ├─> Clasifica impacto del cambio
+   └─> Genera recomendaciones accionables
+
+5️⃣ ALERTAS INTELIGENTES
+   └─> Te notifica SOLO cuando es importante + contexto completo
+
+6️⃣ DASHBOARD UNIFICADO
+   ├─> Tabla comparativa de precios actualizada
+   ├─> Lista de oportunidades competitivas
+   ├─> Timeline de movimientos estratégicos
+   └─> Gaps/ventajas identificadas
+
+7️⃣ REPORTS AUTOMÁTICOS
+   └─> PDF semanal con insights para tu equipo
+```
+
+### 💎 Ejemplo de Caso de Uso Real:
+
+**Situación:**
+Tienes un SaaS de gestión de proyectos. Competidor A es tu rival principal.
+
+**Lo que el sistema haría automáticamente:**
+
+```
+📅 Lunes 14 de Octubre, 9:00 AM
+└─> Email Report Semanal:
+
+┌────────────────────────────────────────────────────┐
+│ 🚨 WEEKLY COMPETITIVE INTELLIGENCE REPORT          │
+├────────────────────────────────────────────────────┤
+│                                                    │
+│ TOP INSIGHTS ESTA SEMANA:                          │
+│                                                    │
+│ 1. 💰 Competidor A bajó precio 20% ($99 → $79)   │
+│    • Impacto: ALTO                                │
+│    • Tu precio: $89 (ahora 13% más caro)         │
+│    • Acción: Revisar pricing strategy             │
+│                                                    │
+│ 2. ⭐ Competidor A - 18 quejas de soporte lento   │
+│    • "Tardan días en responder"                   │
+│    • OPORTUNIDAD: Tu soporte < 2h es ventaja clave│
+│    • Acción: Crear landing page comparativa       │
+│                                                    │
+│ 3. ✨ Competidor B lanzó "AI Assistant"           │
+│    • Nueva feature anunciada                      │
+│    • Impacto: MEDIO                               │
+│    • Acción: Evaluar si agregar a roadmap         │
+│                                                    │
+├────────────────────────────────────────────────────┤
+│ TABLA COMPARATIVA ACTUALIZADA:                     │
+│                                                    │
+│              │ TÚ    │ Comp A │ Comp B │ Comp C   │
+│ ─────────────┼───────┼────────┼────────┼──────────│
+│ Precio Basic │ $89   │ $79 ↓  │ $95    │ $85      │
+│ Free Trial   │ 14d   │ 7d     │ 30d ✨ │ None     │
+│ Soporte      │ 24/7✅│ ⚠️      │ Biz h  │ 24/7     │
+│ Slack Integr │ ✅    │ ❌ ⚠️   │ ✅     │ ✅       │
+│ AI Features  │ ❌    │ ❌     │ ✅ NEW │ ❌       │
+│                                                    │
+├────────────────────────────────────────────────────┤
+│ 🎯 RECOMENDACIONES PRIORIZADAS:                    │
+│                                                    │
+│ 🔴 URGENTE (Esta semana):                          │
+│  1. Destacar soporte 24/7 en homepage             │
+│  2. Landing page: "Por qué elegir nosotros"       │
+│  3. Email a prospects sobre Slack integration     │
+│                                                    │
+│ 🟡 IMPORTANTE (Este mes):                          │
+│  4. Evaluar igualar precio de Comp A              │
+│  5. Considerar extender free trial a 21 días      │
+│                                                    │
+│ 🟢 MONITOREAR:                                     │
+│  6. AI features de Comp B (tendencia del mercado) │
+│                                                    │
+└────────────────────────────────────────────────────┘
+```
+
+**Resultado:** El usuario sabe EXACTAMENTE qué hacer esta semana para capitalizar las debilidades de sus competidores.
+
+---
+
 ## 🎯 LA FUNCIONALIDAD "WOW" PRIORITARIA
 
 ### AI Competitive Intelligence Reports
@@ -405,27 +555,41 @@ agresivo de adquisición: 2 features nuevas + bajos precios
 
 ### Fase 1: MVP Mejorado (2-3 semanas)
 - [x] Sistema de detección funcional
+- [x] Detección de cambios sin falsos positivos
+- [ ] **Identificador de secciones clave** (Pricing, Reviews, Features)
 - [ ] Extracción básica de datos (precios, headlines)
-- [ ] Integración con OpenAI para análisis
+- [ ] Integración con OpenAI para análisis básico
 - [ ] Alertas contextualizadas v1
 
-### Fase 2: Intelligence Layer (3-4 semanas)
-- [ ] Extractor avanzado (features, tecnologías)
-- [ ] Análisis de tendencias
-- [ ] Competitive matrix automática
-- [ ] Timeline visual de cambios
+### Fase 2: Reviews Intelligence (3-4 semanas) 🆕
+- [ ] **Scraping de reviews** (sitio + G2 + Capterra)
+- [ ] **Análisis de sentimiento** con IA
+- [ ] **Detección de quejas recurrentes** (patrón matching)
+- [ ] **Dashboard de oportunidades competitivas**
+- [ ] Sistema de scoring de pain points
+- [ ] Alertas cuando aumentan quejas sobre un tema
 
-### Fase 3: Reports & Automation (2-3 semanas)
-- [ ] Generación de PDF reports
+### Fase 3: Intelligence Layer (3-4 semanas)
+- [ ] Extractor avanzado (features, tecnologías, social proof)
+- [ ] **Competitive Gaps Analysis** automático
+- [ ] Competitive matrix automática (tabla comparativa)
+- [ ] Timeline visual de cambios estratégicos
+- [ ] Análisis de tendencias del mercado
+
+### Fase 4: Reports & Automation (2-3 semanas)
+- [ ] Generación de PDF reports profesionales
 - [ ] Email automation (reports semanales)
 - [ ] Templates personalizables
 - [ ] Export a Excel/PowerPoint
+- [ ] **Reporte de oportunidades** basado en quejas
 
-### Fase 4: Intelligence Avanzada (4-6 semanas)
+### Fase 5: Intelligence Avanzada (4-6 semanas)
 - [ ] Scoring de agresividad competitiva
-- [ ] Market trends detection
-- [ ] Recomendaciones predictivas
+- [ ] **Predicción de movimientos** basado en patrones
+- [ ] Market trends detection cross-competitor
+- [ ] Recomendaciones predictivas con IA
 - [ ] Dashboard analytics avanzado
+- [ ] **Battle Cards** automáticas para ventas
 
 ---
 
@@ -523,6 +687,24 @@ Si respondiste "Sí" a 3+ preguntas, es una feature válida.
    - Con features de inteligencia
    - Pricing definido
    - Marketing & positioning
+
+---
+
+---
+
+## 🎯 Implementación por Fases
+
+> 📘 **Documentación Técnica Detallada**: Ver [SISTEMA_EXTRACCION_SECCIONES.md](./SISTEMA_EXTRACCION_SECCIONES.md)
+
+### Quick Summary
+
+El sistema identifica y procesa secciones **por separado**:
+1. Primero identifica la sección (ej: Reviews)
+2. Aísla SOLO el HTML de esa sección
+3. Aplica herramientas especializadas para ese tipo
+4. Dashboard con tabs por sección (Pricing, Reviews, Features, etc.)
+
+**Ventaja**: Herramientas específicas por sección, no busca en toda la página.
 
 ---
 
