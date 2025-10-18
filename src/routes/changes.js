@@ -60,8 +60,15 @@ router.get('/', asyncHandler(async (req, res) => {
       whereConditions.severity = severity
     }
 
-    // Filtro por tipo (basado en changeSummary)
-    if (type) {
+    // Filtro de búsqueda (busca en changeSummary)
+    if (search && search.trim()) {
+      whereConditions.changeSummary = {
+        [require('sequelize').Op.iLike]: `%${search.trim()}%`
+      }
+    }
+    
+    // Filtro por tipo (también usa changeSummary, pero solo si no hay búsqueda)
+    if (type && !search) {
       whereConditions.changeSummary = {
         [require('sequelize').Op.iLike]: `%${type}%`
       }
