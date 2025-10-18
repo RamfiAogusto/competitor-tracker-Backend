@@ -98,7 +98,25 @@ router.post('/register', validateUser.register, asyncHandler(async (req, res) =>
       hasRefreshToken: !!tokens.refreshToken 
     })
 
-    // 4. Obtener datos públicos del usuario (sin contraseña)
+    // 4. Configurar cookie HttpOnly para refreshToken
+    res.cookie('refreshToken', tokens.refreshToken, {
+      httpOnly: true,  // No accesible desde JavaScript
+      secure: process.env.NODE_ENV === 'production', // Solo HTTPS en producción
+      sameSite: 'lax', // Protección CSRF
+      maxAge: 90 * 24 * 60 * 60 * 1000, // 90 días
+      path: '/'
+    })
+
+    // 5. También enviar accessToken en cookie para el middleware de Next.js
+    res.cookie('token', tokens.accessToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 30 * 24 * 60 * 60 * 1000, // 30 días
+      path: '/'
+    })
+
+    // 6. Obtener datos públicos del usuario (sin contraseña)
     const userData = newUser.toJSON()
 
     logger.info('Paso 5: Enviando respuesta', { userId: userData.id })
@@ -108,7 +126,10 @@ router.post('/register', validateUser.register, asyncHandler(async (req, res) =>
       message: 'Usuario registrado exitosamente',
       data: {
         user: userData,
-        tokens
+        tokens: {
+          accessToken: tokens.accessToken
+          // refreshToken NO se envía en el body por seguridad
+        }
       }
     })
   } catch (error) {
@@ -186,7 +207,25 @@ router.post('/login', validateUser.login, asyncHandler(async (req, res) => {
       role: user.role
     })
 
-    // 5. Obtener datos públicos del usuario (sin contraseña)
+    // 5. Configurar cookie HttpOnly para refreshToken
+    res.cookie('refreshToken', tokens.refreshToken, {
+      httpOnly: true,  // No accesible desde JavaScript
+      secure: process.env.NODE_ENV === 'production', // Solo HTTPS en producción
+      sameSite: 'lax', // Protección CSRF
+      maxAge: 90 * 24 * 60 * 60 * 1000, // 90 días
+      path: '/'
+    })
+
+    // 6. También enviar accessToken en cookie para el middleware de Next.js
+    res.cookie('token', tokens.accessToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 30 * 24 * 60 * 60 * 1000, // 30 días
+      path: '/'
+    })
+
+    // 7. Obtener datos públicos del usuario (sin contraseña)
     const userData = user.toJSON()
 
     res.json({
@@ -194,7 +233,10 @@ router.post('/login', validateUser.login, asyncHandler(async (req, res) => {
       message: 'Login exitoso',
       data: {
         user: userData,
-        tokens
+        tokens: {
+          accessToken: tokens.accessToken
+          // refreshToken NO se envía en el body por seguridad
+        }
       }
     })
   } catch (error) {
@@ -208,12 +250,13 @@ router.post('/login', validateUser.login, asyncHandler(async (req, res) => {
  * Renovar token de acceso
  */
 router.post('/refresh', asyncHandler(async (req, res) => {
-  const { refreshToken } = req.body
+  // Leer refreshToken de cookie HttpOnly
+  const refreshToken = req.cookies?.refreshToken
 
   if (!refreshToken) {
-    return res.status(400).json({
+    return res.status(401).json({
       success: false,
-      message: 'Refresh token requerido'
+      message: 'Refresh token no encontrado'
     })
   }
 
@@ -246,11 +289,30 @@ router.post('/refresh', asyncHandler(async (req, res) => {
       role: user.role
     })
 
+    // 4. Actualizar cookies
+    res.cookie('refreshToken', tokens.refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 90 * 24 * 60 * 60 * 1000,
+      path: '/'
+    })
+
+    res.cookie('token', tokens.accessToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 30 * 24 * 60 * 60 * 1000,
+      path: '/'
+    })
+
     res.json({
       success: true,
       message: 'Token renovado exitosamente',
       data: {
-        tokens
+        tokens: {
+          accessToken: tokens.accessToken
+        }
       }
     })
   } catch (error) {
@@ -384,9 +446,9 @@ router.put('/profile', authenticateToken, validateUser.update, asyncHandler(asyn
  */
 router.post('/logout', authenticateToken, asyncHandler(async (req, res) => {
   try {
-    // En una implementación completa, aquí se invalidarían los tokens
-    // agregándolos a una blacklist en Redis o base de datos
-    // Por ahora, simplemente confirmamos el logout
+    // Limpiar cookies HttpOnly
+    res.clearCookie('refreshToken', { path: '/' })
+    res.clearCookie('token', { path: '/' })
     
     logger.info('Usuario cerró sesión', {
       userId: req.user?.id,

@@ -9,6 +9,7 @@ const helmet = require('helmet')
 const morgan = require('morgan')
 const compression = require('compression')
 const rateLimit = require('express-rate-limit')
+const cookieParser = require('cookie-parser')
 
 // Configuración y utilidades
 const config = require('./config')
@@ -81,6 +82,9 @@ class App {
         }
       }))
     }
+
+    // Parsing de cookies
+    this.app.use(cookieParser())
 
     // Parsing de JSON y URL-encoded con UTF-8
     this.app.use(express.json({ 
