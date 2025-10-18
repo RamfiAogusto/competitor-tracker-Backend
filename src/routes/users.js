@@ -384,6 +384,28 @@ router.put('/profile', authenticateToken, validateUser.update, asyncHandler(asyn
       })
     }
 
+    // Si se está actualizando la contraseña, validar la contraseña actual
+    if (updateData.password) {
+      if (!updateData.currentPassword) {
+        return res.status(400).json({
+          success: false,
+          message: 'La contraseña actual es requerida para cambiar la contraseña'
+        })
+      }
+
+      // Verificar contraseña actual
+      const isValidPassword = await userData.validatePassword(updateData.currentPassword)
+      if (!isValidPassword) {
+        return res.status(401).json({
+          success: false,
+          message: 'La contraseña actual es incorrecta'
+        })
+      }
+
+      // Remover currentPassword del updateData antes de actualizar
+      delete updateData.currentPassword
+    }
+
     // Si se está actualizando el email, verificar que no esté duplicado
     if (updateData.email && updateData.email !== userData.email) {
       const existingUser = await User.findOne({
