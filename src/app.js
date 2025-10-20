@@ -10,15 +10,18 @@ const morgan = require('morgan')
 const compression = require('compression')
 const rateLimit = require('express-rate-limit')
 const cookieParser = require('cookie-parser')
+const session = require('express-session')
 
 // Configuración y utilidades
 const config = require('./config')
 const logger = require('./utils/logger')
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandler')
 const { testConnection, syncModels } = require('./database/config')
+const passport = require('./config/passport')
 
 // Rutas
 const apiRoutes = require('./routes')
+const authRoutes = require('./routes/auth')
 
 class App {
   constructor () {
@@ -86,6 +89,21 @@ class App {
     // Parsing de cookies
     this.app.use(cookieParser())
 
+    // Configuración de sesiones para Passport
+    this.app.use(session({
+      secret: config.jwt.secret,
+      resave: false,
+      saveUninitialized: false,
+      cookie: {
+        secure: process.env.NODE_ENV === 'production',
+        maxAge: 24 * 60 * 60 * 1000 // 24 horas
+      }
+    }))
+
+    // Inicializar Passport
+    this.app.use(passport.initialize())
+    this.app.use(passport.session())
+
     // Parsing de JSON y URL-encoded con UTF-8
     this.app.use(express.json({ 
       limit: '10mb',
@@ -96,6 +114,10 @@ class App {
       limit: '10mb',
       type: 'application/x-www-form-urlencoded'
     }))
+
+    // Servir archivos estáticos desde la carpeta public
+    const path = require('path')
+    this.app.use('/uploads', express.static(path.join(__dirname, '../public/uploads')))
 
     // Headers de seguridad y encoding
     this.app.use((req, res, next) => {
@@ -121,6 +143,9 @@ class App {
         version: process.env.npm_package_version || '1.0.0'
       })
     })
+
+    // Rutas de autenticación (sin middleware de auth)
+    this.app.use('/api/auth', authRoutes)
 
     // API routes
     this.app.use('/api', apiRoutes)

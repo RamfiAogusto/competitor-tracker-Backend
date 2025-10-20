@@ -23,10 +23,27 @@ const User = sequelize.define('User', {
   },
   password: {
     type: DataTypes.STRING,
-    allowNull: false,
+    allowNull: true, // Permitir null para usuarios de Google
     validate: {
       len: [8, 255]
     }
+  },
+  googleId: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    unique: true,
+    field: 'google_id'
+  },
+  avatar: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    comment: 'Avatar de Google o externo'
+  },
+  customAvatar: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    field: 'custom_avatar',
+    comment: 'Avatar personalizado subido por el usuario'
   },
   name: {
     type: DataTypes.STRING,
@@ -69,7 +86,7 @@ const User = sequelize.define('User', {
       }
     },
     beforeUpdate: async (user) => {
-      if (user.changed('password')) {
+      if (user.changed('password') && user.password) {
         user.password = await bcrypt.hash(user.password, 12)
       }
     }

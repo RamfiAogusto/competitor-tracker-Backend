@@ -487,4 +487,130 @@ router.post('/logout', authenticateToken, asyncHandler(async (req, res) => {
   }
 }))
 
+/**
+ * PUT /api/users/avatar
+ * Subir o actualizar avatar personalizado
+ */
+const { uploadAvatar } = require('../middleware/upload')
+const imageService = require('../services/imageService')
+const path = require('path')
+
+router.put('/avatar', authenticateToken, uploadAvatar, asyncHandler(async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: 'No se proporcionó ninguna imagen'
+      })
+    }
+
+    logger.info('Subiendo avatar para usuario', {
+      userId: req.user.id,
+      filename: req.file.filename
+    })
+
+    // Procesar imagen con sharp
+    const processedPath = await imageService.processAvatar(req.file.path)
+    
+    // Obtener usuario
+    const user = await User.findByPk(req.user.id)
+    
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'Usuario no encontrado'
+      })
+    }
+
+    // Eliminar avatar anterior si existe
+    if (user.customAvatar) {
+      const oldAvatarPath = path.join(__dirname, '../../public', user.customAvatar)
+      imageService.deleteAvatar(oldAvatarPath)
+    }
+
+    // Guardar nueva ruta del avatar
+    const avatarUrl = imageService.getAvatarUrl(processedPath)
+    await user.update({ customAvatar: avatarUrl })
+
+    logger.info('Avatar actualizado exitosamente', {
+      userId: user.id,
+      avatarUrl
+    })
+
+    res.json({
+      success: true,
+      message: 'Avatar actualizado exitosamente',
+      data: {
+        avatarUrl,
+        user: user.toJSON()
+      }
+    })
+  } catch (error) {
+    logger.error('Error subiendo avatar:', error)
+    
+    // Eliminar archivo si hubo error
+    if (req.file) {
+      const fs = require('fs')
+      if (fs.existsSync(req.file.path)) {
+        fs.unlinkSync(req.file.path)
+      }
+    }
+    
+    if (error.message.includes('Tipo de archivo')) {
+      return res.status(400).json({
+        success: false,
+        message: error.message
+      })
+    }
+    
+    throw error
+  }
+}))
+
+/**
+ * DELETE /api/users/avatar
+ * Eliminar avatar personalizado
+ */
+router.delete('/avatar', authenticateToken, asyncHandler(async (req, res) => {
+  try {
+    const user = await User.findByPk(req.user.id)
+    
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'Usuario no encontrado'
+      })
+    }
+
+    if (!user.customAvatar) {
+      return res.status(400).json({
+        success: false,
+        message: 'No hay avatar personalizado para eliminar'
+      })
+    }
+
+    // Eliminar archivo del avatar
+    const avatarPath = path.join(__dirname, '../../public', user.customAvatar)
+    imageService.deleteAvatar(avatarPath)
+
+    // Limpiar customAvatar de la base de datos
+    await user.update({ customAvatar: null })
+
+    logger.info('Avatar personalizado eliminado', {
+      userId: user.id
+    })
+
+    res.json({
+      success: true,
+      message: 'Avatar eliminado exitosamente',
+      data: {
+        user: user.toJSON()
+      }
+    })
+  } catch (error) {
+    logger.error('Error eliminando avatar:', error)
+    throw error
+  }
+}))
+
 module.exports = router
