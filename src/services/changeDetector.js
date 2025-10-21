@@ -651,7 +651,7 @@ class ChangeDetector {
       const newVersionNumber = lastSnapshot ? lastSnapshot.versionNumber + 1 : 1
       
       // Determinar si debe ser versión completa
-      const shouldBeFullVersion = (newVersionNumber % this.config.fullVersionInterval) === 0
+      const shouldBeFullVersion = newVersionNumber === 1 || (newVersionNumber % this.config.fullVersionInterval) === 0
       
       // Clasificar automáticamente el tipo de cambio
       const changeType = this.classifyChangeType(comparison.changes || [], comparison.changeSummary || '')
@@ -665,8 +665,8 @@ class ChangeDetector {
       const snapshot = await Snapshot.create({
         competitorId: competitorId,
         versionNumber: newVersionNumber,
-        fullHtml: comparison.currentHtml, // NUNCA comprimir - siempre guardar tal como viene de HeadlessX
-        isFullVersion: true, // Siempre marcar como versión completa
+        fullHtml: shouldBeFullVersion ? comparison.currentHtml : null, // Solo guardar HTML completo si es versión completa
+        isFullVersion: shouldBeFullVersion,
         isCurrent: true,
         changeCount: comparison.changeCount,
         changePercentage: comparison.changePercentage,
@@ -691,8 +691,9 @@ class ChangeDetector {
         changeCount: snapshot.changeCount,
         severity: snapshot.severity,
         changeType: snapshot.changeType,
-        htmlLength: comparison.currentHtml.length,
-        htmlUncompressed: true
+        isFullVersion: shouldBeFullVersion,
+        htmlLength: shouldBeFullVersion ? comparison.currentHtml.length : 0,
+        storageType: shouldBeFullVersion ? 'FULL' : 'DIFF'
       })
 
       return snapshot
@@ -707,6 +708,8 @@ class ChangeDetector {
    */
   async saveDifferences (fromSnapshotId, toSnapshotId, comparison) {
     try {
+      const { SnapshotDiff } = require('../models')
+
       const diffData = {
         changes: comparison.changes,
         changeCount: comparison.changeCount,
@@ -716,17 +719,21 @@ class ChangeDetector {
         timestamp: new Date().toISOString()
       }
 
-      // TODO: Guardar en base de datos
-      const snapshotDiff = {
-        id: this.generateId(),
-        from_snapshot_id: fromSnapshotId,
-        to_snapshot_id: toSnapshotId,
-        diff_data: diffData,
-        change_summary: this.generateChangeSummary(comparison.changes),
-        change_count: comparison.changeCount,
-        change_percentage: comparison.changePercentage,
-        created_at: new Date()
-      }
+      // Guardar en base de datos
+      const snapshotDiff = await SnapshotDiff.create({
+        fromSnapshotId: fromSnapshotId,
+        toSnapshotId: toSnapshotId,
+        diffData: diffData,
+        changeSummary: this.generateChangeSummary(comparison.changes),
+        changeCount: comparison.changeCount,
+        changePercentage: comparison.changePercentage
+      })
+
+      logger.info(`Diferencias guardadas entre snapshots ${fromSnapshotId} → ${toSnapshotId}:`, {
+        diffId: snapshotDiff.id,
+        changeCount: snapshotDiff.changeCount,
+        changePercentage: snapshotDiff.changePercentage
+      })
 
       // Crear metadatos de cambio
       await this.createChangeMetadata(
@@ -779,12 +786,83 @@ class ChangeDetector {
    */
   async reconstructHTMLFromDiffs (snapshotId) {
     try {
-      // TODO: Implementar reconstrucción desde base de datos
-      logger.info(`Reconstruyendo HTML para snapshot ${snapshotId}`)
-      return '<html>Reconstructed HTML</html>' // Placeholder
+      const { Snapshot, SnapshotDiff } = require('../models')
+      const { Op } = require('sequelize')
+
+      logger.info(`🔧 Reconstruyendo HTML para snapshot ${snapshotId}`)
+
+      // 1. Obtener el snapshot objetivo
+      const targetSnapshot = await Snapshot.findByPk(snapshotId)
+      if (!targetSnapshot) {
+        throw new AppError('Snapshot no encontrado', 404)
+      }
+
+      // 2. Encontrar la versión completa más cercana hacia atrás
+      const lastFullVersion = await Snapshot.findOne({
+        where: {
+          competitorId: targetSnapshot.competitorId,
+          versionNumber: { [Op.lte]: targetSnapshot.versionNumber },
+          isFullVersion: true
+        },
+        order: [['versionNumber', 'DESC']]
+      })
+
+      if (!lastFullVersion) {
+        throw new AppError('No se encontró versión completa base para reconstrucción', 404)
+      }
+
+      // Si la versión completa es la misma que buscamos, retornar directamente
+      if (lastFullVersion.id === snapshotId) {
+        logger.info(`✅ Snapshot ${snapshotId} ya es versión completa`)
+        return lastFullVersion.fullHtml
+      }
+
+      logger.info(`📍 Base de reconstrucción: versión ${lastFullVersion.versionNumber} (completa)`)
+
+      // 3. Obtener todos los snapshots entre la versión completa y la objetivo
+      const intermediateSnapshots = await Snapshot.findAll({
+        where: {
+          competitorId: targetSnapshot.competitorId,
+          versionNumber: {
+            [Op.gt]: lastFullVersion.versionNumber,
+            [Op.lte]: targetSnapshot.versionNumber
+          }
+        },
+        order: [['versionNumber', 'ASC']]
+      })
+
+      logger.info(`📦 Snapshots intermedios a reconstruir: ${intermediateSnapshots.length}`)
+
+      // 4. Obtener todos los diffs en orden
+      let currentHtml = lastFullVersion.fullHtml
+      let currentSnapshotId = lastFullVersion.id
+
+      for (const intermediateSnapshot of intermediateSnapshots) {
+        // Buscar el diff entre currentSnapshotId y intermediateSnapshot.id
+        const diff = await SnapshotDiff.findOne({
+          where: {
+            fromSnapshotId: currentSnapshotId,
+            toSnapshotId: intermediateSnapshot.id
+          }
+        })
+
+        if (!diff) {
+          logger.warn(`⚠️  No se encontró diff entre ${currentSnapshotId} y ${intermediateSnapshot.id}`)
+          continue
+        }
+
+        // Aplicar cambios
+        currentHtml = await this.applyChanges(currentHtml, JSON.stringify(diff.diffData.changes))
+        currentSnapshotId = intermediateSnapshot.id
+
+        logger.info(`✓ Aplicado diff para versión ${intermediateSnapshot.versionNumber}`)
+      }
+
+      logger.info(`✅ HTML reconstruido exitosamente para snapshot ${snapshotId}`)
+      return currentHtml
     } catch (error) {
       logger.error('Error reconstruyendo HTML:', error)
-      throw new AppError('Error reconstruyendo HTML', 500)
+      throw new AppError('Error reconstruyendo HTML: ' + error.message, 500)
     }
   }
 

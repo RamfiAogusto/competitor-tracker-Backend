@@ -6,6 +6,7 @@
 const User = require('./User')
 const Competitor = require('./Competitor')
 const Snapshot = require('./Snapshot')
+const SnapshotDiff = require('./SnapshotDiff')
 const Alert = require('./Alert')
 
 // Definir relaciones
@@ -82,9 +83,36 @@ Alert.belongsTo(Snapshot, {
   as: 'snapshot'
 })
 
+// Un snapshot puede tener muchos diffs como "desde"
+Snapshot.hasMany(SnapshotDiff, {
+  foreignKey: 'fromSnapshotId',
+  as: 'diffsFrom',
+  onDelete: 'CASCADE'
+})
+
+// Un snapshot puede tener muchos diffs como "hacia"
+Snapshot.hasMany(SnapshotDiff, {
+  foreignKey: 'toSnapshotId',
+  as: 'diffsTo',
+  onDelete: 'CASCADE'
+})
+
+// Un diff pertenece a un snapshot (desde)
+SnapshotDiff.belongsTo(Snapshot, {
+  foreignKey: 'fromSnapshotId',
+  as: 'fromSnapshot'
+})
+
+// Un diff pertenece a un snapshot (hacia)
+SnapshotDiff.belongsTo(Snapshot, {
+  foreignKey: 'toSnapshotId',
+  as: 'toSnapshot'
+})
+
 module.exports = {
   User,
   Competitor,
   Snapshot,
+  SnapshotDiff,
   Alert
 }
