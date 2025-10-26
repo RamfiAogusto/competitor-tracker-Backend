@@ -25,14 +25,49 @@ class AIService {
     }
 
     try {
+      // Preparar información de cambios detectados
+      let changesInfo = ''
+      if (changeData.changeSummary) {
+        changesInfo = `**Resumen del cambio:** ${changeData.changeSummary}\n\n`
+      }
+      
+      if (changeData.changes && changeData.changes.length > 0) {
+        changesInfo += `**Cambios específicos detectados:**\n`
+        changeData.changes.forEach((change, idx) => {
+          changesInfo += `${idx + 1}. ${change.type || 'Cambio'}: `
+          if (change.value) {
+            changesInfo += `"${change.value}"\n`
+          } else if (change.added) {
+            changesInfo += `Agregado "${change.added}"\n`
+          } else if (change.removed) {
+            changesInfo += `Eliminado "${change.removed}"\n`
+          } else {
+            changesInfo += `${JSON.stringify(change)}\n`
+          }
+        })
+        changesInfo += '\n'
+      }
+
       // Preparar los datos de forma optimizada
-      const sectionsInfo = changeData.sections ? 
+      const sectionsInfo = changeData.sections?.length > 0 ? 
         changeData.sections.map(s => `
 - **Sección:** ${s.type} (${s.selector})
 - **Tipo de cambio:** ${s.changeType}
 - **Cambios detectados:**
 ${s.changes.map(c => `  * ${c.type}: "${c.before}" → "${c.after}"`).join('\n')}
-`).join('\n') : JSON.stringify(changeData.changes, null, 2)
+`).join('\n') : 'No se identificaron secciones específicas.'
+
+      // Preparar fragmentos HTML con contexto
+      let htmlContextInfo = ''
+      if (changeData.htmlSnippets?.snippets?.length > 0) {
+        htmlContextInfo = `\n**Contexto HTML de los cambios:**\n`
+        changeData.htmlSnippets.snippets.forEach((snippet, idx) => {
+          htmlContextInfo += `\n${idx + 1}. **Cambio ${snippet.type === 'added' ? 'agregado' : 'eliminado'}:**\n`
+          htmlContextInfo += `   Antes: ...${snippet.contextBefore}...\n`
+          htmlContextInfo += `   ${snippet.type === 'added' ? '➕' : '➖'} "${snippet.change}"\n`
+          htmlContextInfo += `   Después: ...${snippet.contextAfter}...\n`
+        })
+      }
 
       const prompt = `
 Eres un analista experto en inteligencia competitiva. Analiza los siguientes cambios detectados en el sitio web de un competidor:
@@ -44,8 +79,10 @@ Eres un analista experto en inteligencia competitiva. Analiza los siguientes cam
 **Severidad:** ${changeData.severity || 'medium'}
 **Total de cambios:** ${changeData.totalChanges || 1}
 
+${changesInfo}
 **Secciones modificadas:**
 ${sectionsInfo}
+${htmlContextInfo}
 
 Por favor, proporciona:
 1. **Resumen ejecutivo** (2-3 líneas): ¿Qué cambió y por qué es importante?

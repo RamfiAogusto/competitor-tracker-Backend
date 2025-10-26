@@ -64,7 +64,8 @@ const Snapshot = sequelize.define('Snapshot', {
   },
   metadata: {
     type: DataTypes.JSONB,
-    allowNull: true
+    allowNull: true,
+    field: 'metadata'
   }
 }, {
   tableName: 'snapshots',

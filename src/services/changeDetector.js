@@ -409,7 +409,8 @@ class ChangeDetector {
         changePercentage: 0,
         severity: 'low', // Usar 'low' en lugar de 'none' que no existe en el enum
         changeType: 'other', // Primera captura = other
-        changeSummary: 'Primera captura - versión inicial'
+        changeSummary: 'Primera captura - versión inicial',
+        metadata: null
       })
 
       // Actualizar contador de versiones del competidor
@@ -596,6 +597,9 @@ class ChangeDetector {
         }
       }
 
+      // Extraer fragmentos de HTML alrededor de los cambios para contexto de IA
+      const htmlSnippets = this.extractHTMLSnippets(prevHtmlStr, currHtmlStr, significantChanges)
+
       return {
         changes: significantChanges,
         changeCount: significantChanges.length,
@@ -607,7 +611,8 @@ class ChangeDetector {
         changeSummary: changeSummary,
         normalizedComparison: true,
         extractedSections: extractedSections, // 🆕 Secciones específicas
-        aiAnalysis: aiAnalysis // 🆕 Análisis de IA (si está disponible)
+        aiAnalysis: aiAnalysis, // 🆕 Análisis de IA (si está disponible)
+        htmlSnippets: htmlSnippets // 🆕 Fragmentos HTML para contexto de IA
       }
     } catch (error) {
       logger.error('❌ Error comparando versiones:', error)
@@ -708,7 +713,10 @@ class ChangeDetector {
             changeType: changeType,
             severity: comparison.severity,
             totalChanges: comparison.changeCount,
-            sections: aiPayload.data.sections
+            changeSummary: comparison.changeSummary,
+            changes: comparison.changes,
+            sections: aiPayload.data.sections,
+            htmlSnippets: comparison.htmlSnippets
           })
           
           logger.info('✅ Análisis de IA completado', {
@@ -1495,6 +1503,56 @@ NOTA: Los archivos normalizados son los que se usan para detectar cambios.
     
     // Agregar https:// por defecto
     return `https://${url}`
+  }
+
+  /**
+   * Extraer fragmentos de HTML alrededor de los cambios para contexto de IA
+   */
+  extractHTMLSnippets(prevHtml, currHtml, changes, contextSize = 300) {
+    const snippets = []
+    
+    try {
+      // Procesar cada cambio y extraer contexto
+      changes.forEach((change, index) => {
+        if (!change.added && !change.removed) return
+        
+        const changeValue = change.value || ''
+        const isAddition = change.added
+        const isDeletion = change.removed
+        
+        // Buscar la posición del cambio en el HTML correspondiente
+        const sourceHtml = isDeletion ? prevHtml : currHtml
+        const position = sourceHtml.indexOf(changeValue)
+        
+        if (position === -1) return
+        
+        // Extraer contexto antes y después
+        const start = Math.max(0, position - contextSize)
+        const end = Math.min(sourceHtml.length, position + changeValue.length + contextSize)
+        
+        const before = sourceHtml.substring(start, position)
+        const after = sourceHtml.substring(position + changeValue.length, end)
+        
+        snippets.push({
+          index: index,
+          type: isAddition ? 'added' : 'removed',
+          change: changeValue.trim().substring(0, 100), // Limitar tamaño
+          contextBefore: before.trim().substring(Math.max(0, before.length - 150)),
+          contextAfter: after.trim().substring(0, 150),
+          position: position
+        })
+      })
+      
+      logger.info(`📄 Extraídos ${snippets.length} fragmentos HTML con contexto`)
+      
+      return {
+        snippets: snippets.slice(0, 5), // Limitar a 5 fragmentos más relevantes
+        totalChanges: changes.length
+      }
+    } catch (error) {
+      logger.error('Error extrayendo fragmentos HTML:', error)
+      return { snippets: [], totalChanges: 0 }
+    }
   }
 }
 
