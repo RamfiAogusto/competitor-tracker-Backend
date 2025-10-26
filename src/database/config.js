@@ -7,14 +7,14 @@ const { Sequelize } = require('sequelize')
 const config = require('../config')
 const logger = require('../utils/logger')
 
-// Configuración de Sequelize
+// Configuración de Sequelize - usar config.database
 const sequelize = new Sequelize({
-  host: 'localhost',
-  port: 5432,
-  database: 'Tracker',
-  username: 'postgres',
-  password: '2004',
-  dialect: 'postgres',
+  host: config.database.host,
+  port: config.database.port,
+  database: config.database.name,
+  username: config.database.username,
+  password: config.database.password,
+  dialect: config.database.dialect,
   logging: config.database.logging ? (msg) => logger.debug(msg) : false,
   pool: config.database.pool,
   define: {
@@ -34,12 +34,12 @@ const sequelize = new Sequelize({
 
 // Debug: mostrar configuración de conexión
 logger.debug('Configuración de Sequelize:', {
-  host: 'localhost',
-  port: 5432,
-  database: 'Tracker',
-  username: 'postgres',
+  host: config.database.host,
+  port: config.database.port,
+  database: config.database.name,
+  username: config.database.username,
   password: '***',
-  dialect: 'postgres'
+  dialect: config.database.dialect
 })
 
 // Función para probar la conexión

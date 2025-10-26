@@ -891,6 +891,7 @@ router.get('/:id/history', validateCompetitor.list, asyncHandler(async (req, res
         'severity',
         'changeType',
         'changeSummary',
+        'metadata',
         'created_at',
         'updated_at'
       ]
@@ -1152,12 +1153,13 @@ router.post('/:id/disable-monitoring', validateCompetitor.getById, asyncHandler(
  */
 router.post('/:id/manual-check', validateCompetitor.getById, asyncHandler(async (req, res) => {
   const { id } = req.params
-  const { simulate = false } = req.body
+  const { simulate = false, enableAI = false } = req.body
 
   logger.info('Ejecutando monitoreo manual', {
     userId: req.user.id,
     competitorId: id,
-    simulate
+    simulate,
+    enableAI
   })
 
   try {
@@ -1180,7 +1182,8 @@ router.post('/:id/manual-check', validateCompetitor.getById, asyncHandler(async 
     // Ejecutar captura manual
     const result = await changeDetector.captureChange(competitor.id, competitor.url, {
       simulate,
-      isManualCheck: true
+      isManualCheck: true,
+      enableAI
     })
 
     // Actualizar última verificación

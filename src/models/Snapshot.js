@@ -61,6 +61,10 @@ const Snapshot = sequelize.define('Snapshot', {
   changeSummary: {
     type: DataTypes.TEXT,
     field: 'change_summary'
+  },
+  metadata: {
+    type: DataTypes.JSONB,
+    allowNull: true
   }
 }, {
   tableName: 'snapshots',

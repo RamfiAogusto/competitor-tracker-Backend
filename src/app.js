@@ -22,6 +22,7 @@ const passport = require('./config/passport')
 // Rutas
 const apiRoutes = require('./routes')
 const authRoutes = require('./routes/auth')
+const aiRoutes = require('./routes/ai')
 
 class App {
   constructor () {
@@ -146,6 +147,9 @@ class App {
 
     // Rutas de autenticación (sin middleware de auth)
     this.app.use('/api/auth', authRoutes)
+    
+    // Rutas de IA
+    this.app.use('/api/ai', aiRoutes)
 
     // API routes
     this.app.use('/api', apiRoutes)
@@ -186,12 +190,21 @@ class App {
     try {
       // Probar conexión a base de datos
       logger.info('🔌 Probando conexión a base de datos...')
+      logger.info('🔍 Configuración:', {
+        host: config.database.host,
+        port: config.database.port,
+        database: config.database.name,
+        username: config.database.username
+      })
       const dbConnected = await testConnection()
       
       if (!dbConnected) {
         logger.error('❌ No se pudo conectar a la base de datos')
+        logger.error('🔍 Verifica que PostgreSQL esté corriendo y las credenciales sean correctas')
         process.exit(1)
       }
+      
+      logger.info('✅ Base de datos conectada correctamente')
 
       // Sincronizar modelos en desarrollo
       if (config.nodeEnv === 'development') {

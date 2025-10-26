@@ -38,9 +38,13 @@ async function main () {
   }
 }
 
-// Solo ejecutar si es el archivo principal
-if (require.main === module) {
-  main()
+// Ejecutar siempre que se cargue directamente
+// No usamos require.main === module porque puede no funcionar en Windows
+if (!module.parent || process.argv[1]?.includes('server.js')) {
+  main().catch(error => {
+    console.error('Fatal error:', error)
+    process.exit(1)
+  })
 }
 
 module.exports = main

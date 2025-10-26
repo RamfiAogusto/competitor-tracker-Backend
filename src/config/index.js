@@ -138,8 +138,8 @@ const config = {
 function validateConfig () {
   const required = [
     'jwt.secret',
-    'headlessX.url',
-    'headlessX.token'
+    'headlessX.url'
+    // headlessX.token no es obligatorio en desarrollo
   ]
 
   const missing = required.filter(key => {
@@ -149,6 +149,11 @@ function validateConfig () {
 
   if (missing.length > 0) {
     throw new Error(`Configuración faltante: ${missing.join(', ')}`)
+  }
+
+  // Validación opcional de headlessX.token
+  if (!config.headlessX.token) {
+    console.warn('⚠️ HEADLESSX_TOKEN no configurado (opcional en desarrollo)')
   }
 }
 

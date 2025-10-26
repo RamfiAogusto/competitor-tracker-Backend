@@ -14,15 +14,22 @@ class HeadlessXService {
     this.token = config.headlessX.token
     this.timeout = config.headlessX.timeout
 
+    // Configurar headers
+    const headers = {
+      'Content-Type': 'application/json',
+      'User-Agent': 'Competitor-Tracker-Backend/1.0.0'
+    }
+
+    // Solo agregar Authorization si hay token
+    if (this.token) {
+      headers['Authorization'] = `Bearer ${this.token}`
+    }
+
     // Configurar cliente axios
     this.client = axios.create({
       baseURL: this.baseURL,
       timeout: this.timeout,
-      headers: {
-        'Authorization': `Bearer ${this.token}`,
-        'Content-Type': 'application/json',
-        'User-Agent': 'Competitor-Tracker-Backend/1.0.0'
-      }
+      headers
     })
 
     // Interceptor para logging de requests
@@ -124,6 +131,11 @@ class HeadlessXService {
         url,
         waitFor: options.waitFor || 3000,
         removeScripts: options.removeScripts !== false ? 'true' : 'false'
+      }
+
+      // Agregar token si está configurado (HeadlessX puede requerirlo como query param)
+      if (this.token) {
+        params.token = this.token
       }
 
       // Usar GET en lugar de POST (HeadlessX funciona mejor con GET)

@@ -10,6 +10,8 @@ const config = require('../config')
 const logger = require('../utils/logger')
 const headlessXService = require('./headlessXService')
 const alertService = require('./alertService')
+const sectionExtractor = require('./sectionExtractor')
+const aiService = require('./aiService')
 const { AppError } = require('../middleware/errorHandler')
 
 const gzip = promisify(zlib.gzip)
@@ -568,6 +570,32 @@ class ChangeDetector {
         logger.info('  (Muchos cambios - ver archivo de debug para detalles)')
       }
 
+      // 🤖 NUEVO: Extraer secciones específicas donde ocurrieron los cambios
+      let extractedSections = null
+      let aiAnalysis = null
+      
+      if (significantChanges.length > 0) {
+        try {
+          logger.info('🔍 Extrayendo secciones específicas de los cambios...')
+          extractedSections = sectionExtractor.extractChangedSection(
+            prevHtmlStr,
+            currHtmlStr,
+            significantChanges
+          )
+          
+          logger.info(`✅ Secciones extraídas: ${extractedSections.sections.length}`)
+          logger.info(`📊 ${extractedSections.summary}`)
+          
+          // Preparar datos optimizados para la IA
+          const aiPayload = sectionExtractor.prepareForAI(extractedSections)
+          logger.info(`📦 Datos preparados para IA: ${aiPayload.estimatedTokens} tokens estimados`)
+          
+        } catch (extractError) {
+          logger.error('❌ Error extrayendo secciones:', extractError)
+          // Continuar sin extracción de secciones
+        }
+      }
+
       return {
         changes: significantChanges,
         changeCount: significantChanges.length,
@@ -577,7 +605,9 @@ class ChangeDetector {
         severity: severity,
         currentHtml: currHtmlStr,
         changeSummary: changeSummary,
-        normalizedComparison: true
+        normalizedComparison: true,
+        extractedSections: extractedSections, // 🆕 Secciones específicas
+        aiAnalysis: aiAnalysis // 🆕 Análisis de IA (si está disponible)
       }
     } catch (error) {
       logger.error('❌ Error comparando versiones:', error)
@@ -661,6 +691,36 @@ class ChangeDetector {
         await lastSnapshot.update({ isCurrent: false })
       }
       
+      // 🤖 Análisis de IA (opcional, solo si se solicita)
+      let aiAnalysisData = null
+      if (options.enableAI && comparison.extractedSections) {
+        try {
+          logger.info('🤖 Iniciando análisis de IA...')
+          const { Competitor } = require('../models')
+          const competitor = await Competitor.findByPk(competitorId)
+          
+          const aiPayload = sectionExtractor.prepareForAI(comparison.extractedSections)
+          
+          aiAnalysisData = await aiService.analyzeChanges({
+            competitorName: competitor?.name || 'Desconocido',
+            url: competitor?.url || '',
+            date: new Date().toISOString(),
+            changeType: changeType,
+            severity: comparison.severity,
+            totalChanges: comparison.changeCount,
+            sections: aiPayload.data.sections
+          })
+          
+          logger.info('✅ Análisis de IA completado', {
+            urgencia: aiAnalysisData.urgencia,
+            recomendaciones: aiAnalysisData.recomendaciones?.length || 0
+          })
+        } catch (aiError) {
+          logger.error('❌ Error en análisis de IA:', aiError)
+          // Continuar sin análisis de IA
+        }
+      }
+      
       // Crear nueva versión en la base de datos
       const snapshot = await Snapshot.create({
         competitorId: competitorId,
@@ -672,7 +732,16 @@ class ChangeDetector {
         changePercentage: comparison.changePercentage,
         severity: comparison.severity,
         changeType: changeType,
-        changeSummary: comparison.changeSummary
+        changeSummary: comparison.changeSummary,
+        // 🆕 Guardar secciones extraídas y análisis de IA
+        metadata: {
+          extractedSections: comparison.extractedSections ? {
+            summary: comparison.extractedSections.summary,
+            sectionsCount: comparison.extractedSections.sections.length,
+            sectionTypes: comparison.extractedSections.sections.map(s => s.sectionType)
+          } : null,
+          aiAnalysis: aiAnalysisData
+        }
       })
 
       // Actualizar contador de versiones del competidor
