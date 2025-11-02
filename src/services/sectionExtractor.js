@@ -68,14 +68,32 @@ class SectionExtractor {
 
   /**
    * Encuentra el elemento padre semántico más cercano
+   * Usa múltiples estrategias de detección en cascada
    */
   findSemanticParent(change, $) {
-    // Elementos semánticos que queremos identificar
+    // ESTRATEGIA 1: IDs y clases explícitas (más confiable)
+    const explicitSelectors = [
+      '#hero', '#pricing', '#features', '#testimonials', '#reviews',
+      '.hero-section', '.pricing-section', '.features-section', 
+      '.testimonials-section', '.reviews-section',
+      '[data-section="hero"]', '[data-section="pricing"]', '[data-section="features"]'
+    ]
+
+    for (const selector of explicitSelectors) {
+      const element = $(selector)
+      if (element.length > 0 && this.containsChange(element, change)) {
+        return this.generateSelector(element)
+      }
+    }
+
+    // ESTRATEGIA 2: Elementos semánticos HTML5 + clases comunes
     const semanticTags = [
       'header', 'nav', 'main', 'section', 'article', 'aside', 'footer',
       'div[class*="hero"]', 'div[class*="banner"]', 'div[class*="pricing"]',
-      'div[class*="feature"]', 'div[class*="testimonial"]', 'div[class*="cta"]',
-      'div[id*="hero"]', 'div[id*="pricing"]', 'div[id*="features"]'
+      'div[class*="price"]', 'div[class*="plan"]', 'div[class*="feature"]', 
+      'div[class*="testimonial"]', 'div[class*="review"]', 'div[class*="cta"]',
+      'div[id*="hero"]', 'div[id*="pricing"]', 'div[id*="features"]',
+      'section[class*="hero"]', 'section[class*="pricing"]', 'section[class*="features"]'
     ]
 
     // Si el cambio tiene un path, intentar usarlo
@@ -88,22 +106,125 @@ class SectionExtractor {
       }
     }
 
-    // Si no se encuentra, buscar por el valor del cambio
+    // ESTRATEGIA 3: Buscar por headers (h1-h3) con palabras clave
+    if (change.value) {
+      const headerResult = this.findByHeaderKeywords($, change)
+      if (headerResult) return headerResult
+    }
+
+    // ESTRATEGIA 4: Buscar por el valor del cambio en el contenido
     if (change.value) {
       const text = typeof change.value === 'string' ? change.value : JSON.stringify(change.value)
-      const element = $(`*:contains("${text.substring(0, 50)}")`).first()
+      // Escapar caracteres especiales para el selector
+      const escapedText = text.substring(0, 50).replace(/['"\\]/g, '')
       
-      if (element.length > 0) {
-        for (const tag of semanticTags) {
-          const parent = element.closest(tag)
-          if (parent.length > 0) {
-            return this.generateSelector(parent)
+      try {
+        const element = $(`*:contains("${escapedText}")`).first()
+        
+        if (element.length > 0) {
+          for (const tag of semanticTags) {
+            const parent = element.closest(tag)
+            if (parent.length > 0) {
+              return this.generateSelector(parent)
+            }
+          }
+          
+          // Si no encontramos un padre semántico, buscar el contenedor más cercano
+          const container = element.closest('div, section, article')
+          if (container.length > 0) {
+            return this.generateSelector(container)
+          }
+        }
+      } catch (error) {
+        logger.debug('Error buscando por contenido:', error.message)
+      }
+    }
+
+    // ESTRATEGIA 5: Análisis de estructura DOM (buscar contenedores con múltiples elementos similares)
+    const structuralResult = this.findByStructure($, change)
+    if (structuralResult) return structuralResult
+
+    return null
+  }
+
+  /**
+   * ESTRATEGIA 3: Buscar sección por headers con palabras clave
+   */
+  findByHeaderKeywords($, change) {
+    const keywords = {
+      pricing: ['pricing', 'precios', 'planes', 'plans', 'suscripción', 'subscription', 'paquetes', 'tarifas'],
+      features: ['features', 'características', 'funcionalidades', 'beneficios', 'ventajas'],
+      testimonials: ['testimonials', 'testimonios', 'reviews', 'reseñas', 'opiniones', 'clientes'],
+      hero: ['hero', 'inicio', 'bienvenida', 'welcome'],
+      cta: ['cta', 'call to action', 'comenzar', 'empezar', 'registrarse', 'sign up', 'get started']
+    }
+
+    const headers = $('h1, h2, h3, h4')
+    
+    for (let i = 0; i < headers.length; i++) {
+      const header = $(headers[i])
+      const headerText = header.text().toLowerCase()
+      
+      // Verificar si el header contiene alguna palabra clave
+      for (const [sectionType, keywordList] of Object.entries(keywords)) {
+        if (keywordList.some(keyword => headerText.includes(keyword))) {
+          // Encontrar la sección padre
+          const section = header.closest('section, div[class*="section"], article, main')
+          
+          if (section.length > 0 && this.containsChange(section, change)) {
+            logger.debug(`Sección encontrada por header: ${sectionType}`)
+            return this.generateSelector(section)
           }
         }
       }
     }
 
     return null
+  }
+
+  /**
+   * ESTRATEGIA 5: Buscar por estructura DOM (contenedores con elementos repetidos)
+   */
+  findByStructure($, change) {
+    // Buscar contenedores con múltiples elementos similares (típico de pricing, features, testimonials)
+    const containers = $('div, section, article')
+    
+    for (let i = 0; i < containers.length; i++) {
+      const container = $(containers[i])
+      const children = container.children()
+      
+      // Si tiene 2-6 hijos directos similares, probablemente es una sección de cards/planes
+      if (children.length >= 2 && children.length <= 6) {
+        const firstChildClass = $(children[0]).attr('class')
+        
+        if (firstChildClass) {
+          // Contar cuántos hijos tienen la misma clase
+          const similarChildren = children.filter((idx, child) => {
+            return $(child).attr('class') === firstChildClass
+          }).length
+          
+          // Si al menos el 50% son similares y contiene el cambio
+          if (similarChildren >= children.length * 0.5 && this.containsChange(container, change)) {
+            logger.debug('Sección encontrada por estructura DOM')
+            return this.generateSelector(container)
+          }
+        }
+      }
+    }
+
+    return null
+  }
+
+  /**
+   * Verifica si un elemento contiene el cambio
+   */
+  containsChange(element, change) {
+    if (!change.value) return true
+    
+    const text = typeof change.value === 'string' ? change.value : JSON.stringify(change.value)
+    const elementText = element.text()
+    
+    return elementText.includes(text.substring(0, 50))
   }
 
   /**
@@ -133,11 +254,21 @@ class SectionExtractor {
     const elementBefore = $before(section.selector).first()
     const elementAfter = $after(section.selector).first()
 
+    // Usar el elemento 'after' para identificar el tipo (es el más actual)
+    const elementForType = elementAfter.length > 0 ? elementAfter : elementBefore
+    
+    // Identificar tipo de sección
+    const sectionType = this.identifySectionType(section.selector, elementForType)
+    
+    // Calcular score de confianza
+    const confidence = this.calculateConfidenceScore(section.selector, sectionType, elementForType)
+
     // Extraer información relevante
     const context = {
       selector: section.selector,
-      sectionType: this.identifySectionType(section.selector),
+      sectionType: sectionType,
       changeType: section.changeType,
+      confidence: confidence, // Agregar score de confianza
       
       before: {
         exists: elementBefore.length > 0,
@@ -156,25 +287,73 @@ class SectionExtractor {
 
     // Calcular el cambio específico
     context.changes = this.calculateSpecificChanges(context.before, context.after)
+    
+    // Log de detección
+    logger.debug(`🎯 Sección detectada: ${sectionType} (confianza: ${(confidence * 100).toFixed(0)}%)`, {
+      selector: section.selector,
+      changes: context.changes.length
+    })
 
     return context
   }
 
   /**
-   * Identifica el tipo de sección basado en el selector
+   * Identifica el tipo de sección basado en el selector y contenido
+   * Usa patrones múltiples para mayor precisión
    */
-  identifySectionType(selector) {
+  identifySectionType(selector, element = null) {
     const lowerSelector = selector.toLowerCase()
     
-    if (lowerSelector.includes('hero') || lowerSelector.includes('banner')) return 'hero'
-    if (lowerSelector.includes('pricing') || lowerSelector.includes('price')) return 'pricing'
-    if (lowerSelector.includes('feature')) return 'features'
-    if (lowerSelector.includes('testimonial') || lowerSelector.includes('review')) return 'testimonials'
-    if (lowerSelector.includes('cta') || lowerSelector.includes('call-to-action')) return 'cta'
-    if (lowerSelector.includes('nav')) return 'navigation'
-    if (lowerSelector.includes('header')) return 'header'
-    if (lowerSelector.includes('footer')) return 'footer'
-    if (lowerSelector.includes('form')) return 'form'
+    // Patrones por tipo de sección (ordenados por especificidad)
+    const patterns = {
+      hero: ['hero', 'banner', 'jumbotron', 'splash', 'intro-section'],
+      pricing: ['pricing', 'price', 'plan', 'subscription', 'tarifa', 'paquete'],
+      features: ['feature', 'benefit', 'characteristic', 'funcionalidad', 'ventaja'],
+      testimonials: ['testimonial', 'review', 'opinion', 'testimonio', 'reseña'],
+      cta: ['cta', 'call-to-action', 'signup', 'register', 'get-started', 'comenzar'],
+      navigation: ['nav', 'menu', 'navbar'],
+      header: ['header', 'top-bar', 'site-header'],
+      footer: ['footer', 'site-footer', 'bottom'],
+      form: ['form', 'contact', 'subscribe', 'newsletter'],
+      about: ['about', 'about-us', 'quienes-somos', 'nosotros'],
+      team: ['team', 'equipo', 'staff', 'people'],
+      gallery: ['gallery', 'galeria', 'portfolio'],
+      blog: ['blog', 'news', 'noticias', 'articles'],
+      faq: ['faq', 'preguntas', 'questions', 'ayuda']
+    }
+    
+    // Verificar cada patrón
+    for (const [type, keywords] of Object.entries(patterns)) {
+      if (keywords.some(keyword => lowerSelector.includes(keyword))) {
+        return type
+      }
+    }
+    
+    // Si tenemos el elemento, analizar su contenido para mejor clasificación
+    if (element && element.length > 0) {
+      const text = element.text().toLowerCase()
+      const html = element.html()?.toLowerCase() || ''
+      
+      // Detectar pricing por símbolos de moneda
+      if (/[\$€£¥]/.test(text) || /price|precio|cost|costo/i.test(text)) {
+        return 'pricing'
+      }
+      
+      // Detectar forms por inputs
+      if (html.includes('<input') || html.includes('<form')) {
+        return 'form'
+      }
+      
+      // Detectar testimonials por comillas o ratings
+      if (/".*"|'.*'/.test(text) || /★|⭐|rating|stars/i.test(html)) {
+        return 'testimonials'
+      }
+      
+      // Detectar CTA por botones con texto específico
+      if (/sign up|get started|try|demo|comenzar|empezar|probar/i.test(text)) {
+        return 'cta'
+      }
+    }
     
     return 'content'
   }
@@ -278,8 +457,68 @@ class SectionExtractor {
 
     const sectionTypes = sections.map(s => s.sectionType)
     const uniqueTypes = [...new Set(sectionTypes)]
+    
+    // Contar secciones por tipo
+    const typeCounts = {}
+    sectionTypes.forEach(type => {
+      typeCounts[type] = (typeCounts[type] || 0) + 1
+    })
+    
+    // Crear resumen detallado
+    const details = Object.entries(typeCounts)
+      .map(([type, count]) => count > 1 ? `${type} (${count})` : type)
+      .join(', ')
 
-    return `Se detectaron cambios en ${sections.length} sección(es): ${uniqueTypes.join(', ')}`
+    logger.info(`📊 Resumen de secciones: ${details}`)
+
+    return `Se detectaron cambios en ${sections.length} sección(es): ${details}`
+  }
+
+  /**
+   * Calcula un score de confianza para la detección de una sección
+   */
+  calculateConfidenceScore(selector, sectionType, element) {
+    let score = 0.5 // Base score
+    
+    const lowerSelector = selector.toLowerCase()
+    
+    // +0.3 si el selector tiene ID específico
+    if (lowerSelector.includes(`#${sectionType}`)) {
+      score += 0.3
+    }
+    
+    // +0.2 si el selector tiene clase específica
+    if (lowerSelector.includes(`.${sectionType}`) || lowerSelector.includes(`-${sectionType}`)) {
+      score += 0.2
+    }
+    
+    // +0.1 si es un elemento semántico HTML5
+    if (['header', 'nav', 'main', 'section', 'article', 'aside', 'footer'].some(tag => 
+      lowerSelector.startsWith(tag)
+    )) {
+      score += 0.1
+    }
+    
+    // Análisis de contenido si tenemos el elemento
+    if (element && element.length > 0) {
+      const text = element.text().toLowerCase()
+      const html = element.html()?.toLowerCase() || ''
+      
+      // Verificaciones específicas por tipo
+      if (sectionType === 'pricing' && /[\$€£¥]/.test(text)) {
+        score += 0.15
+      }
+      
+      if (sectionType === 'testimonials' && (/".*"|'.*'/.test(text) || /★|⭐/.test(html))) {
+        score += 0.15
+      }
+      
+      if (sectionType === 'form' && (html.includes('<input') || html.includes('<form'))) {
+        score += 0.15
+      }
+    }
+    
+    return Math.min(score, 1.0) // Cap at 1.0
   }
 
   /**
