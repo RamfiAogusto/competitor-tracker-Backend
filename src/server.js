@@ -23,6 +23,13 @@ process.on('unhandledRejection', (reason, promise) => {
 // Función principal
 async function main () {
   try {
+    console.log('\n' + '='.repeat(60))
+    console.log('⚡ INICIANDO COMPETITOR TRACKER BACKEND...')
+    console.log('='.repeat(60))
+    console.log(`📋 Entorno: ${config.nodeEnv}`)
+    console.log(`📡 Puerto configurado: ${config.server.port}`)
+    console.log('='.repeat(60) + '\n')
+    
     logger.info('🚀 Iniciando Competitor Tracker Backend...')
     logger.info(`📋 Configuración cargada para entorno: ${config.nodeEnv}`)
 
@@ -33,6 +40,14 @@ async function main () {
     await app.start()
     
   } catch (error) {
+    console.error('\n' + '='.repeat(60))
+    console.error('💥 ERROR FATAL AL INICIAR EL BACKEND')
+    console.error('='.repeat(60))
+    console.error('Tipo de error:', error.constructor.name)
+    console.error('Mensaje:', error.message)
+    console.error('Stack:', error.stack)
+    console.error('='.repeat(60) + '\n')
+    
     logger.error('💥 Error fatal iniciando la aplicación:', error)
     process.exit(1)
   }
@@ -42,7 +57,10 @@ async function main () {
 // No usamos require.main === module porque puede no funcionar en Windows
 if (!module.parent || process.argv[1]?.includes('server.js')) {
   main().catch(error => {
-    console.error('Fatal error:', error)
+    console.error('\n❌ ERROR FATAL:')
+    console.error(error)
+    console.error('\nStack trace:')
+    console.error(error.stack)
     process.exit(1)
   })
 }

@@ -17,19 +17,14 @@ const config = require('./config')
 const logger = require('./utils/logger')
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandler')
 const { testConnection, syncModels } = require('./database/config')
-const passport = require('./config/passport')
-
-// Rutas
-const apiRoutes = require('./routes')
-const authRoutes = require('./routes/auth')
-const aiRoutes = require('./routes/ai')
+// NO cargar passport aquí - se carga después de conectar a la BD
 
 class App {
   constructor () {
     this.app = express()
     this.setupMiddleware()
-    this.setupRoutes()
-    this.setupErrorHandling()
+    // NO cargar rutas aquí - se cargan después de conectar a la BD
+    // NO cargar error handling aquí - se carga después de las rutas
   }
 
   /**
@@ -101,9 +96,7 @@ class App {
       }
     }))
 
-    // Inicializar Passport
-    this.app.use(passport.initialize())
-    this.app.use(passport.session())
+    // Passport se inicializa después de conectar a la BD (en start())
 
     // Parsing de JSON y URL-encoded con UTF-8
     this.app.use(express.json({ 
@@ -122,10 +115,18 @@ class App {
 
     // Headers de seguridad y encoding
     this.app.use((req, res, next) => {
+      // Debug: Log de todas las peticiones
+      logger.debug(`📥 ${req.method} ${req.path}`)
+      
       res.setHeader('X-Content-Type-Options', 'nosniff')
       res.setHeader('X-Frame-Options', 'DENY')
       res.setHeader('X-XSS-Protection', '1; mode=block')
-      res.setHeader('Content-Type', 'application/json; charset=utf-8')
+      
+      // NO establecer Content-Type para rutas de autenticación (OAuth necesita redirecciones)
+      if (!req.path.startsWith('/api/auth')) {
+        res.setHeader('Content-Type', 'application/json; charset=utf-8')
+      }
+      
       next()
     })
   }
@@ -144,6 +145,11 @@ class App {
         version: process.env.npm_package_version || '1.0.0'
       })
     })
+
+    // ✅ Cargar rutas dinámicamente (después de que la BD esté lista)
+    const apiRoutes = require('./routes')
+    const authRoutes = require('./routes/auth')
+    const aiRoutes = require('./routes/ai')
 
     // Rutas de autenticación (sin middleware de auth)
     this.app.use('/api/auth', authRoutes)
@@ -212,8 +218,50 @@ class App {
         await syncModels()
       }
 
+      // ✅ AHORA SÍ inicializar Passport (después de que la BD esté lista)
+      logger.info('🔐 Inicializando Passport...')
+      const passport = require('./config/passport')
+      this.app.use(passport.initialize())
+      this.app.use(passport.session())
+      logger.info('✅ Passport inicializado correctamente')
+
+    // ✅ AHORA SÍ cargar las rutas (después de que la BD esté lista)
+    logger.info('📋 Cargando rutas de la API...')
+    this.setupRoutes()
+    logger.info('✅ Rutas cargadas correctamente')
+    
+    // ✅ AHORA SÍ cargar el manejo de errores (después de las rutas)
+    logger.info('⚠️ Configurando manejo de errores...')
+    this.setupErrorHandling()
+    logger.info('✅ Manejo de errores configurado')
+    
+    // Debug: Listar todas las rutas registradas
+    logger.info('🔍 Rutas registradas:')
+    this.app._router.stack.forEach((middleware) => {
+      if (middleware.route) {
+        logger.info(`  ${Object.keys(middleware.route.methods).join(', ').toUpperCase()} ${middleware.route.path}`)
+      } else if (middleware.name === 'router') {
+        middleware.handle.stack.forEach((handler) => {
+          if (handler.route) {
+            const path = middleware.regexp.source.replace('\\/?(?=\\/|$)', '').replace(/\\\//g, '/').replace('^', '')
+            logger.info(`  ${Object.keys(handler.route.methods).join(', ').toUpperCase()} ${path}${handler.route.path}`)
+          }
+        })
+      }
+    })
+
       const port = config.server.port
       const server = this.app.listen(port, () => {
+        console.log('\n' + '='.repeat(60))
+        console.log('🚀 COMPETITOR TRACKER BACKEND - SERVIDOR INICIADO')
+        console.log('='.repeat(60))
+        console.log(`📡 Puerto:        ${port}`)
+        console.log(`🌍 Entorno:       ${config.nodeEnv}`)
+        console.log(`🔗 API URL:       http://localhost:${port}/api`)
+        console.log(`📊 Health Check:  http://localhost:${port}/health`)
+        console.log(`🗄️  Base de Datos: ${config.database.name}@${config.database.host}:${config.database.port}`)
+        console.log('='.repeat(60) + '\n')
+        
         logger.info(`🚀 Servidor iniciado en puerto ${port}`)
         logger.info(`🌍 Entorno: ${config.nodeEnv}`)
         logger.info(`📊 Health check: http://localhost:${port}/health`)

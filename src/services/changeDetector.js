@@ -386,7 +386,8 @@ class ChangeDetector {
    */
   async captureInitialVersion (competitorId, url, html, options = {}) {
     try {
-      const { Snapshot, Competitor } = require('../models')
+      const { Snapshot } = require('../models')
+      const { Competitor } = require('../models')
       
       // NUNCA comprimir HTML - siempre guardar tal como viene de HeadlessX
       const htmlToSave = html
@@ -511,7 +512,6 @@ class ChangeDetector {
       })
 
       // Actualizar contador de versiones del competidor
-      const { Competitor } = require('../models')
       await Competitor.update(
         { totalVersions: 1 },
         { where: { id: competitorId } }
@@ -770,6 +770,7 @@ class ChangeDetector {
   async createNewVersion (competitorId, comparison, options = {}) {
     try {
       const { Snapshot } = require('../models')
+      const { Competitor } = require('../models')
       
       // Obtener última versión de la base de datos
       const lastSnapshot = await Snapshot.findOne({
@@ -798,7 +799,6 @@ class ChangeDetector {
       if (options.enableAI && comparison.extractedSections) {
         try {
           logger.info('🤖 Iniciando análisis de IA...')
-          const { Competitor } = require('../models')
           const competitor = await Competitor.findByPk(competitorId)
           
           const aiPayload = sectionExtractor.prepareForAI(comparison.extractedSections)
@@ -850,7 +850,6 @@ class ChangeDetector {
       })
 
       // Actualizar contador de versiones del competidor
-      const { Competitor } = require('../models')
       await Competitor.update(
         { 
           totalVersions: newVersionNumber,

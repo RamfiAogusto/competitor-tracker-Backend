@@ -3,28 +3,36 @@
  */
 
 const express = require('express')
-const passport = require('../config/passport')
 const config = require('../config')
 const logger = require('../utils/logger')
 const { asyncHandler } = require('../middleware/errorHandler')
 
 const router = express.Router()
 
+logger.info('🔧 Módulo auth.js cargado')
+
 /**
  * GET /api/auth/google
  * Iniciar autenticación con Google
  */
-router.get('/google', passport.authenticate('google', {
-  scope: ['profile', 'email']
-}))
+router.get('/google', (req, res, next) => {
+  logger.info('🔐 Ruta /google ejecutada')
+  const passport = require('../config/passport')
+  passport.authenticate('google', {
+    scope: ['profile', 'email']
+  })(req, res, next)
+})
+
+logger.info('✅ Ruta GET /google registrada')
 
 /**
  * GET /api/auth/google/callback
  * Callback de Google OAuth
  */
-router.get('/google/callback', 
-  passport.authenticate('google', { session: false }),
-  asyncHandler(async (req, res) => {
+router.get('/google/callback', (req, res, next) => {
+  const passport = require('../config/passport')
+  passport.authenticate('google', { session: false })(req, res, next)
+}, asyncHandler(async (req, res) => {
     try {
       const { user, tokens } = req.user
 

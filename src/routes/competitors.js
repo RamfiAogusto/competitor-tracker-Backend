@@ -912,6 +912,25 @@ router.get('/:id/history', validateCompetitor.list, asyncHandler(async (req, res
       returnedVersions: rows.length
     })
 
+    // Debug: Log metadata de cada snapshot
+    rows.forEach((row, idx) => {
+      if (row.metadata) {
+        logger.debug(`Snapshot ${idx + 1} metadata:`, {
+          hasInitialStructure: !!row.metadata.initialStructure,
+          hasAiAnalysis: !!row.metadata.aiAnalysis,
+          hasExtractedSections: !!row.metadata.extractedSections
+        })
+        
+        // Log estructura inicial si existe
+        if (row.metadata.initialStructure) {
+          logger.debug(`Snapshot ${idx + 1} initialStructure:`, {
+            sectionsCount: row.metadata.initialStructure.sectionsCount,
+            summary: row.metadata.initialStructure.summary?.substring(0, 100)
+          })
+        }
+      }
+    })
+
     res.json({
       success: true,
       data: history.data,
