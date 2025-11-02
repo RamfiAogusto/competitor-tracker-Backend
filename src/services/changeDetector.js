@@ -386,7 +386,7 @@ class ChangeDetector {
    */
   async captureInitialVersion (competitorId, url, html, options = {}) {
     try {
-      const { Snapshot } = require('../models')
+      const { Snapshot, Competitor } = require('../models')
       
       // NUNCA comprimir HTML - siempre guardar tal como viene de HeadlessX
       const htmlToSave = html
@@ -397,6 +397,103 @@ class ChangeDetector {
         isManualCheck: options.isManualCheck,
         htmlPreview: html.substring(0, 100) + '...'
       })
+
+      // ✅ NUEVO: Analizar estructura inicial del sitio
+      let initialMetadata = null
+      
+      if (options.enableAI || true) { // Siempre analizar estructura inicial
+        try {
+          logger.info('🔍 Analizando estructura inicial del sitio web...')
+          
+          // Analizar estructura sin necesidad de comparación
+          const cheerio = require('cheerio')
+          const $ = cheerio.load(html)
+          
+          // Identificar todas las secciones principales del sitio
+          const initialSections = []
+          const commonSelectors = [
+            'header', 'nav', 'main', 'section', 'article', 'footer',
+            '#hero', '#pricing', '#features', '#about', '#contact', '#testimonials',
+            '.hero', '.pricing', '.features', '.about', '.contact', '.testimonials',
+            '[data-section]'
+          ]
+          
+          const seenSelectors = new Set()
+          
+          commonSelectors.forEach(selector => {
+            try {
+              const elements = $(selector)
+              elements.each((idx, elem) => {
+                const element = $(elem)
+                const generatedSelector = sectionExtractor.generateSelector(element)
+                
+                if (!seenSelectors.has(generatedSelector)) {
+                  seenSelectors.add(generatedSelector)
+                  
+                  const sectionType = sectionExtractor.identifySectionType(generatedSelector, element)
+                  const confidence = sectionExtractor.calculateConfidenceScore(generatedSelector, sectionType, element)
+                  
+                  initialSections.push({
+                    selector: generatedSelector,
+                    type: sectionType,
+                    confidence: confidence,
+                    text: sectionExtractor.extractRelevantText(element),
+                    hasId: !!element.attr('id'),
+                    hasClass: !!element.attr('class')
+                  })
+                }
+              })
+            } catch (err) {
+              logger.debug(`Error analizando selector ${selector}:`, err.message)
+            }
+          })
+          
+          // Ordenar por confianza
+          initialSections.sort((a, b) => b.confidence - a.confidence)
+          
+          logger.info(`✅ Estructura inicial analizada: ${initialSections.length} secciones detectadas`)
+          
+          initialMetadata = {
+            initialStructure: {
+              sectionsCount: initialSections.length,
+              sections: initialSections.slice(0, 20), // Limitar a 20 secciones principales
+              summary: `Sitio web con ${initialSections.length} secciones detectadas: ${[...new Set(initialSections.map(s => s.type))].join(', ')}`
+            }
+          }
+          
+          // Si enableAI está activado, hacer análisis de IA de la estructura inicial
+          if (options.enableAI) {
+            logger.info('🤖 Generando análisis de IA de la estructura inicial...')
+            
+            const competitor = await Competitor.findByPk(competitorId)
+            
+            const aiAnalysis = await aiService.analyzeChanges({
+              competitorName: competitor?.name || 'Desconocido',
+              url: url,
+              date: new Date().toISOString(),
+              changeType: 'initial',
+              severity: 'low',
+              totalChanges: 0,
+              changeSummary: 'Primera captura - análisis de estructura inicial',
+              sections: initialSections.slice(0, 10).map(s => ({
+                type: s.type,
+                selector: s.selector,
+                confidence: s.confidence,
+                changeType: 'initial',
+                changes: []
+              })),
+              htmlSnippets: { snippets: [], totalChanges: 0 }
+            })
+            
+            initialMetadata.aiAnalysis = aiAnalysis
+            logger.info('✅ Análisis de IA completado para estructura inicial')
+          }
+          
+        } catch (analysisError) {
+          logger.error('❌ Error analizando estructura inicial:', analysisError)
+          // Continuar sin metadata si falla el análisis
+        }
+      }
 
       // Crear snapshot en la base de datos
       const snapshot = await Snapshot.create({
@@ -410,7 +507,7 @@ class ChangeDetector {
         severity: 'low', // Usar 'low' en lugar de 'none' que no existe en el enum
         changeType: 'other', // Primera captura = other
         changeSummary: 'Primera captura - versión inicial',
-        metadata: null
+        metadata: initialMetadata // ✅ Guardar metadata con estructura inicial
       })
 
       // Actualizar contador de versiones del competidor
