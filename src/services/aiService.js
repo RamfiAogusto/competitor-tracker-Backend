@@ -94,9 +94,23 @@ Responde en formato JSON:
   /**
    * Analiza los cambios detectados en un competidor (optimizado para tokens)
    */
+  /**
+   * Analiza los cambios detectados en un competidor (optimizado para tokens)
   async analyzeChanges(changeData) {
     if (!this.genAI) {
       throw new Error('Google AI no está configurado')
+    }
+
+    // 🛑 SAFETY CHECK: Si no hubo cambios en secciones específicas (ruido técnico), cortar alucinaciones.
+    if (changeData.sections && changeData.sections.length === 0) {
+      logger.info('Skipping deep AI analysis for technical noise (0 sections changed)')
+      return {
+        resumen: "Mantenimiento Técnico / Ruido",
+        impacto: ["Cambios en código interno sin impacto estratégico visible", "Posible limpieza de scripts o atributos dinámicos"],
+        recomendaciones: ["Ignorar esta alerta si el sitio se ve igual", "Verificar manualmente si persiste"],
+        urgencia: "Bajo",
+        insights: "El sistema detectó cambios menores en el código HTML (atributos, espaciado) pero ninguna sección de contenido principal fue afectada."
+      }
     }
 
     try {
@@ -161,10 +175,14 @@ ${htmlContextInfo}
 
 **TU ANÁLISIS (OUTPUT):**
 Analiza estos datos técnicos y tradúcelos a lenguaje de negocios.
+IMPORTANTE: Sé ESCÉPTICO. Si los cambios son solo códigos, IDs, URLs de imágenes (ej: 'apple-touch-icon'), o ajustes menores de estilo, NO INVENTES una estrategia. Simplemente repórtalo como "Mantenimiento Técnico".
+Solo reporta "Estrategia" si ves cambios en: TEXTO, PRECIOS, OFERTAS o ESTRUCTURA VISIBLE.
+
 - Si cambiaron precios -> ¿Están iniciando una guerra de precios? ¿Subieron mercado?
 - Si cambiaron el Hero -> ¿Han cambiado su Propuesta de Valor? ¿A qué nuevo segmento apuntan?
 - Si añadieron Features -> ¿Están cerrando una brecha de producto?
 - Si cambiaron botones/CTAs -> ¿Están optimizando conversión agresivamente?
+- Si solo son hashes/iconos -> "Mantenimiento/Optimización técnica menor".
 
 Responde en formato JSON estrictamente:
 {

@@ -776,7 +776,10 @@ class ChangeDetector {
       const newVersionNumber = lastSnapshot ? lastSnapshot.versionNumber + 1 : 1
       
       // Determinar si debe ser versión completa
-      const shouldBeFullVersion = newVersionNumber === 1 || (newVersionNumber % this.config.fullVersionInterval) === 0
+      // ⚠️ FIX: Forzamos SIEMPRE versión completa (true) porque la lógica de reconstrucción (diffs)
+      // es incompatible con la normalización agresiva de Cheerio. Al limpiar scripts/styles,
+      // los diffs pierden contexto y reconstruyen HTML corrupto. Guardar fullHtml evita esto.
+      const shouldBeFullVersion = true // newVersionNumber === 1 || (newVersionNumber % this.config.fullVersionInterval) === 0
       
       // Clasificar automáticamente el tipo de cambio
       const changeType = this.classifyChangeType(comparison.changes || [], comparison.changeSummary || '')
@@ -1337,70 +1340,74 @@ class ChangeDetector {
   normalizeHTML(html) {
     if (!html || typeof html !== 'string') return ''
     
-    let normalized = html
-    
-    // 1. Remover scripts completos (pueden cambiar entre cargas)
-    normalized = normalized.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
-    
-    // 🛡️ 1b. Remover tags <style> completos (CSS dinámico)
-    normalized = normalized.replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '')
+    // 0. Cargar Cheerio para limpieza robusta (evita fallos de regex)
+    const cheerio = require('cheerio')
+    const $ = cheerio.load(html, { decodeEntities: false, xmlMode: false })
 
-    // 🛡️ 1c. Remover inputs ocultos (tokens CSRF, viewstates, etc.)
-    normalized = normalized.replace(/<input[^>]*type=["']hidden["'][^>]*>/gi, '')
+    // 1. Remover Elementos Ruidosos Completos
+    $('script').remove()
+    $('style').remove()
+    $('link').remove()
+    $('noscript').remove()
+    $('iframe, object, embed').remove()
+    $('input[type="hidden"]').remove()
+    $('meta[name="csrf-token"], meta[name="csrf-param"], meta[name="_token"]').remove()
+    $('meta[name="viewport"], meta[name="generator"]').remove()
+    
+    // 2. Limpiar Atributos Ruidosos en TODOS los elementos
+    $('*').each((i, el) => {
+      const elem = $(el)
+      const attrs = elem.attr() || {}
+      
+      Object.keys(attrs).forEach(attr => {
+        // Remover style inline, data-*, aria-*, on* (event handlers)
+        // 🛡️ NOISE FILTER: También removemos 'class' e 'id' porque generan falso positivos
+        // y no representan cambios estratégicos de contenido.
+        if (
+          attr === 'style' || 
+          attr === 'class' || 
+          attr === 'id' ||
+          attr.startsWith('data-') || 
+          attr.startsWith('aria-') || 
+          attr.startsWith('on')
+        ) {
+          elem.removeAttr(attr)
+        }
+        
+        // Normalizar URLs en src/href (eliminar UUIDs y Hashes)
+        if (attr === 'src' || attr === 'href') {
+           let val = attrs[attr]
+           let modified = false
+           
+           // Hash replacement: /6446c728... -> /[HASH]
+           if (val.match(/[a-f0-9-]{20,}/)) {
+             val = val.replace(/[a-f0-9-]{20,}/g, '[HASH]')
+             modified = true
+           }
+           // Cache busting: ?v=123 -> ?v=[PARAM]
+           if (val.match(/(\?|&)(v|t|ver|timestamp)=/)) {
+             val = val.replace(/(\?|&)(v|t|ver|timestamp)=[^&"']+/g, '$1$2=[PARAM]')
+             modified = true
+           }
+           
+           if (modified) elem.attr(attr, val)
+        }
+      })
+    })
 
-    // 2. Remover noscript tags
-    normalized = normalized.replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, '')
+    // 3. Obtener HTML y aplicar limpiezas finales de texto (Regex es seguro ahora que la estructura está limpia)
+    let normalized = $.html()
     
-    // 3. Remover comentarios HTML
-    normalized = normalized.replace(/<!--[\s\S]*?-->/g, '')
-    
-    // 4. Remover timestamps dinámicos (múltiples formatos)
+    // 4. Regex para limpieza de texto final
+    normalized = normalized.replace(/<!--[\s\S]*?-->/g, '') 
     normalized = normalized.replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/g, '[TIMESTAMP]')
-    normalized = normalized.replace(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/g, '[TIMESTAMP]')
     normalized = normalized.replace(/\d{13,}/g, '[UNIX_TIMESTAMP]')
     
-    // 5. Remover IDs únicos y hashes (React, Next.js, etc.)
-    normalized = normalized.replace(/__className_[a-f0-9]+/g, '__className_[ID]')
-    normalized = normalized.replace(/__nextjs_[a-f0-9]+/g, '__nextjs_[ID]')
-    normalized = normalized.replace(/id="[a-f0-9]{8,}"/gi, 'id="[HASH]"')
-    normalized = normalized.replace(/class="[^"]*[a-f0-9]{8,}[^"]*"/gi, 'class="[HASH_CLASS]"')
-    
-    // 6. Remover TODOS los atributos data-* (suelen ser dinámicos)
-    normalized = normalized.replace(/\s*data-[a-z0-9-]+="[^"]*"/gi, '')
-    
-    // 7. Remover atributos aria-* dinámicos
-    normalized = normalized.replace(/\s*aria-describedby="[^"]*"/gi, '')
-    normalized = normalized.replace(/\s*aria-labelledby="[^"]*"/gi, '')
-    normalized = normalized.replace(/\s*aria-controls="[^"]*"/gi, '')
-    
-    // 8. Remover atributos de estilo inline (pueden variar)
-    normalized = normalized.replace(/\s*style="[^"]*"/gi, '')
-    
-    // 9. Normalizar espacios en blanco
+    // 5. Normalizar espacios
     normalized = normalized.replace(/\s+/g, ' ')
     normalized = normalized.replace(/>\s+</g, '><')
-    normalized = normalized.replace(/\s+>/g, '>')
-    normalized = normalized.replace(/<\s+/g, '<')
     
-    // 10. Remover meta tags dinámicos (csrf, tokens, etc.)
-    normalized = normalized.replace(/<meta[^>]*name=["']csrf[^>]*>/gi, '')
-    normalized = normalized.replace(/<meta[^>]*name=["']token[^>]*>/gi, '')
-    normalized = normalized.replace(/<meta[^>]*property=["']og:updated_time[^>]*>/gi, '')
-    
-    // 11. Normalizar URLs con query strings de cache busting
-    normalized = normalized.replace(/\?v=\d+/g, '?v=[VERSION]')
-    normalized = normalized.replace(/\?t=\d+/g, '?t=[TIMESTAMP]')
-    normalized = normalized.replace(/\?_=\d+/g, '?_=[CACHE]')
-    
-    // 12. Remover espacios al inicio y final
-    normalized = normalized.trim()
-    
-    const reduction = html.length - normalized.length
-    const reductionPercent = (reduction / html.length * 100).toFixed(1)
-    
-    logger.info('✅ Normalizado: ' + html.length + ' → ' + normalized.length + ' (' + reductionPercent + '% reducido)')
-    
-    return normalized
+    return normalized.trim()
   }
 
   /**
