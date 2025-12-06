@@ -38,7 +38,12 @@ async function login() {
       return false
     }
   } catch (error) {
-    console.error('❌ Error en login:', error.response?.data?.message || error.message)
+    console.error('❌ Error en login detallado:', {
+      message: error.message,
+      status: error.response?.status,
+      data: error.response?.data,
+      code: error.code
+    })
     return false
   }
 }

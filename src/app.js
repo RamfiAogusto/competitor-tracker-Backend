@@ -150,12 +150,16 @@ class App {
     const apiRoutes = require('./routes')
     const authRoutes = require('./routes/auth')
     const aiRoutes = require('./routes/ai')
+    const sseRoutes = require('./routes/sse')
 
     // Rutas de autenticación (sin middleware de auth)
     this.app.use('/api/auth', authRoutes)
     
     // Rutas de IA
     this.app.use('/api/ai', aiRoutes)
+    
+    // Rutas de SSE (Server-Sent Events)
+    this.app.use('/api/sse', sseRoutes)
 
     // API routes
     this.app.use('/api', apiRoutes)

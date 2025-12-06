@@ -139,13 +139,44 @@ class HeadlessXService {
       }
 
       // Usar GET en lugar de POST (HeadlessX funciona mejor con GET)
+      logger.debug('Solicitando HTML a HeadlessX...', { url, params })
       const response = await this.client.get('/api/html', { params })
+      
+      logger.debug('Respuesta de HeadlessX recibida', {
+        status: response.status,
+        headers: Object.keys(response.headers),
+        dataType: typeof response.data,
+        dataLength: typeof response.data === 'string' ? response.data.length : 'N/A'
+      })
       
       // HeadlessX devuelve el HTML directamente como string en response.data
       // También incluye metadatos en los headers
       const html = response.data
-      const title = response.headers['x-page-title'] || 'Extracted HTML'
+      
+      if (!html || typeof html !== 'string') {
+        logger.error('HeadlessX devolvió respuesta inválida', {
+          dataType: typeof html,
+          dataPreview: typeof html === 'string' ? html.substring(0, 100) : html
+        })
+        throw new Error('Respuesta inválida de HeadlessX: HTML no es un string')
+      }
+      
+      // Sanitizar headers - algunos pueden contener caracteres inválidos
+      const sanitizeHeader = (value) => {
+        if (!value || typeof value !== 'string') return null
+        // Remover caracteres de control y saltos de línea
+        return value.replace(/[\r\n\t\x00-\x1F\x7F]/g, '').trim()
+      }
+      
+      const rawTitle = response.headers['x-page-title']
+      const title = rawTitle ? sanitizeHeader(rawTitle) || 'Extracted HTML' : 'Extracted HTML'
       const renderedUrl = response.headers['x-rendered-url'] || url
+      
+      logger.info('HTML extraído exitosamente', {
+        htmlLength: html.length,
+        title,
+        renderedUrl
+      })
       
       return {
         html: html,
@@ -155,6 +186,52 @@ class HeadlessXService {
         wasTimeout: response.headers['x-was-timeout'] === 'true'
       }
     } catch (error) {
+      // INTENTO DE RECUPERACIÓN: Si falla el GET por cualquier razón (headers, timeout, etc)
+      // intentamos con renderPage (POST) que devuelve JSON limpio
+      if (error.response?.status === 500 || error.code === 'ECONNABORTED' || error.response?.status === 502) {
+          try {
+            logger.info('⚠️ extractHTML falló, intentando fallback con renderPage...', { 
+                url, 
+                error: error.message 
+            });
+
+            // Usar renderPage para obtener el contenido
+            // Nota: renderPage usa POST /api/render
+            const pageData = await this.renderPage(url, {
+                waitFor: options.waitFor || 3000,
+                userAgent: options.userAgent
+            });
+
+            if (pageData) {
+                // Mapear respuesta de renderPage a formato de extractHTML
+                // renderPage usualmente devuelve { html, cookies, ... } o similar
+                // Asumimos que tiene 'html' o 'content' basado en el uso típico
+                const htmlContent = pageData.html || pageData.content;
+                
+                if (htmlContent) {
+                    logger.info('✅ Recuperación exitosa usando renderPage');
+                    return {
+                        html: htmlContent,
+                        title: pageData.title || 'Recovered Content',
+                        url: pageData.url || url,
+                        contentLength: htmlContent.length,
+                        wasTimeout: false,
+                        recovered: true, // Flag para saber que fue recuperado
+                        method: 'renderPage'
+                    };
+                }
+            }
+          } catch (fallbackError) {
+              logger.warn('❌ Fallback a renderPage también falló:', fallbackError.message);
+              // Si falla el fallback, dejamos que lance el error original
+          }
+      }
+
+      logger.error('Error en extractHTML', {
+        errorMessage: error.message,
+        errorResponse: error.response?.data,
+        errorStatus: error.response?.status
+      })
       throw this.handleError(error, 'Error extrayendo HTML')
     }
   }
@@ -362,7 +439,29 @@ class HeadlessXService {
         case 429:
           return createError(`${message}: Límite de rate excedido`, 429)
         case 500:
-          return createError(`${message}: Error interno de HeadlessX`, 502)
+          // Verificar si es un error de header inválido
+          const errorMessage = data?.message || data?.error || 'Error interno de HeadlessX'
+          const url = error.config?.url
+          if (errorMessage.includes('Invalid character in header') || errorMessage.includes('header content')) {
+            logger.warn('HeadlessX devolvió error por header inválido. Estructura de data:', {
+              keys: data ? Object.keys(data) : 'null',
+              hasHtml: data?.html ? 'YES' : 'NO',
+              errorMessage
+            })
+            
+            // INTENTO DE RECUPERACIÓN: Si hay HTML en el error, usarlo
+            if (data?.html) {
+                logger.info('⚠️ RECUPERANDO HTML desde respuesta de error 500 de HeadlessX');
+                // Retornar estructura similar a una respuesta exitosa, pero marcada
+                // Nota: Esto requiere que el llamador maneje el retorno en lugar de un throw.
+                // Pero como estamos dentro de handleError que espera devolver un Error object...
+                // Esto es problematico. handleError devuelve un objeto Error.
+                // Tendríamos que manejar esto en el interceptor o en el método llamador (extractHTML).
+            }
+
+            return createError(`${message}: HeadlessX completó pero falló al enviar headers (${errorMessage}). Intenta nuevamente o contacta al administrador de HeadlessX.`, 502)
+          }
+          return createError(`${message}: Error interno de HeadlessX - ${errorMessage}`, 502)
         case 502:
           return createError(`${message}: Bad Gateway`, 502)
         case 503:

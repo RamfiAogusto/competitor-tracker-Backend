@@ -405,13 +405,54 @@ router.post('/', validateCompetitor.create, asyncHandler(async (req, res) => {
       priority: priority || 'medium'
     })
 
+    // ✅ Ejecutar análisis inicial automáticamente en segundo plano
+    // Esperar 2 segundos para dar tiempo a que el frontend establezca la conexión SSE
+    const changeDetector = require('../services/changeDetector')
+    const { notifyAnalysisComplete, notifyAnalysisError } = require('./sse')
+    
+    setTimeout(async () => {
+      try {
+        logger.info('🚀 Ejecutando análisis inicial automático', {
+          competitorId: newCompetitor.id,
+          competitorName: newCompetitor.name,
+          url: normalizedUrl
+        })
+        
+        const result = await changeDetector.captureChange(newCompetitor.id, normalizedUrl, {
+          isManualCheck: false,
+          enableAI: true // Habilitar IA por defecto en el primer análisis
+        })
+        
+        logger.info('✅ Análisis inicial completado exitosamente', {
+          competitorId: newCompetitor.id,
+          competitorName: newCompetitor.name
+        })
+        
+        // 📡 Notificar a través de SSE
+        notifyAnalysisComplete(newCompetitor.id, {
+          totalVersions: 1,
+          versionNumber: 1,
+          result
+        })
+      } catch (error) {
+        logger.error('❌ Error en análisis inicial automático:', {
+          competitorId: newCompetitor.id,
+          error: error.message,
+          stack: error.stack
+        })
+        
+        // 📡 Notificar error a través de SSE
+        notifyAnalysisError(newCompetitor.id, error)
+      }
+    }, 2000) // Esperar 2 segundos para que el frontend establezca SSE
+
     // Remover userId de la respuesta
     const responseData = newCompetitor.toJSON()
     delete responseData.userId
 
     res.status(201).json({
       success: true,
-      message: 'Competidor creado exitosamente',
+      message: 'Competidor creado exitosamente. El análisis inicial se está ejecutando en segundo plano.',
       data: responseData
     })
   } catch (error) {

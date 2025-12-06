@@ -37,7 +37,7 @@ const config = {
   headlessX: {
     url: process.env.HEADLESSX_URL || 'http://localhost:3000',
     token: process.env.HEADLESSX_TOKEN || '',
-    timeout: parseInt(process.env.HEADLESSX_TIMEOUT, 10) || 60000
+    timeout: parseInt(process.env.HEADLESSX_TIMEOUT, 10) || 0 // 0 = sin timeout, HeadlessX toma el tiempo que necesite
   },
 
   // Autenticación JWT
