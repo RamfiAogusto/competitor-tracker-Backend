@@ -1220,8 +1220,16 @@ class ChangeDetector {
             const isPunctuation = /^[.,;:!?¿¡()\[\]{}"'<>\/\\|@#$%^&*+=~`\-_]+$/.test(trimmedValue)
             if (isPunctuation) return false
           }
+
+          // 🛡️ NOISE FILTER: Ignorar hashes hexadecimales (ej: "4d10dcc0", "a1b2c3d4e5")
+          // Detecta strings de 6+ caracteres que son solo hex o combinaciones típicas de IDs generados
+          const isHash = /^[a-f0-9]{6,}$/i.test(trimmedValue) || 
+                         /^[a-z0-9]{20,}$/i.test(trimmedValue) ||
+                         /^[0-9]+$/.test(trimmedValue) // Ignorar cambios puramente numéricos
           
-          // Aceptar cualquier cambio con letras o números
+          if (isHash) return false
+          
+          // Aceptar cualquier cambio con letras o números (que no sea hash)
           const hasContent = /[a-zA-Z0-9áéíóúñÁÉÍÓÚÑ]/.test(trimmedValue)
           return hasContent
         }
@@ -1334,6 +1342,12 @@ class ChangeDetector {
     // 1. Remover scripts completos (pueden cambiar entre cargas)
     normalized = normalized.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
     
+    // 🛡️ 1b. Remover tags <style> completos (CSS dinámico)
+    normalized = normalized.replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '')
+
+    // 🛡️ 1c. Remover inputs ocultos (tokens CSRF, viewstates, etc.)
+    normalized = normalized.replace(/<input[^>]*type=["']hidden["'][^>]*>/gi, '')
+
     // 2. Remover noscript tags
     normalized = normalized.replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, '')
     
