@@ -468,22 +468,14 @@ class ChangeDetector {
             
             const competitor = await Competitor.findByPk(competitorId)
             
-            const aiAnalysis = await aiService.analyzeChanges({
+            const aiAnalysis = await aiService.analyzeInitialStructure({
               competitorName: competitor?.name || 'Desconocido',
               url: url,
-              date: new Date().toISOString(),
-              changeType: 'initial',
-              severity: 'low',
-              totalChanges: 0,
-              changeSummary: 'Primera captura - análisis de estructura inicial',
-              sections: initialSections.slice(0, 10).map(s => ({
+              sections: initialSections.slice(0, 15).map(s => ({
                 type: s.type,
                 selector: s.selector,
-                confidence: s.confidence,
-                changeType: 'initial',
-                changes: []
-              })),
-              htmlSnippets: { snippets: [], totalChanges: 0 }
+                confidence: s.confidence
+              }))
             })
             
             initialMetadata.aiAnalysis = aiAnalysis

@@ -17,6 +17,81 @@ class AIService {
   }
 
   /**
+   * Analiza la estructura inicial de un sitio (Perfilado de Competidor)
+   */
+  async analyzeInitialStructure(data) {
+    if (!this.genAI) {
+      throw new Error('Google AI no está configurado')
+    }
+
+    try {
+      const sectionsList = data.sections.map(s => 
+        `- ${s.type} (${s.selector}): Confianza ${(s.confidence * 100).toFixed(0)}%`
+      ).join('\n')
+
+      const prompt = `
+Eres un Estratega de Inteligencia Competitiva. Acabamos de descubrir un nuevo competidor y esta es la estructura de su sitio web.
+Tu trabajo es crear un "Perfil de Amenaza" inicial.
+
+**Datos del Competidor:**
+- Nombre Interno (Asignado por el usuario): ${data.competitorName}
+- URL Real: ${data.url}
+- Secciones Detectadas:
+${sectionsList}
+
+**Instrucción:**
+Analiza qué tipo de negocio es y cuál es su estrategia basándote PRINCIPALMENTE en su URL y estructura web.
+ADVERTENCIA: El "Nombre Interno" es solo una etiqueta que le puso el usuario al guardarlo (ej: "portfolio", "competencia 1"). NO bases tu análisis estratégico en este nombre a menos que te sirva de contexto. Lo importante es lo que hay en el sitio.
+
+NO menciones obviedades como "se ha iniciado el monitoreo".
+Céntrate 100% en perfilar el negocio real detrás de esa URL.
+
+Responde en formato JSON:
+{
+  "resumen": "Perfil breve del competidor (ej: 'Consultor freelance enfocado en UX...', 'SaaS B2B agresivo con modelo freemium...'). Deduce su enfoque basado en las secciones (ej: si tiene 'pricing' es producto, si tiene 'blog' busca SEO).",
+  "impacto": [
+    "Punto 1: Nivel de madurez digital percibido (basado en tecnologías/estructura)",
+    "Punto 2: Posible modelo de negocio (ej: Venta directa vs Lead generation)",
+    "Punto 3: Enfoque de mercado (ej: Corporativo vs Startup)"
+  ],
+  "recomendaciones": [
+    "Acción estratégica 1 (ej: Revisar sus precios si tienen tabla de precios)",
+    "Acción estratégica 2 (ej: Analizar su copy en la sección Hero)"
+  ],
+  "urgencia": "Bajo|Medio|Alto (Basado en qué tan completa/profesional se ve su web)",
+  "insights": "Cualquier observación técnica o estratégica adicional (ej: 'Usa frameworks modernos', 'Estructura muy simple')"
+}
+`
+
+      const result = await this.model.generateContent(prompt)
+      const response = await result.response
+      const text = response.text()
+      
+      logger.info('Análisis inicial de estructura completado', { competitorName: data.competitorName })
+      
+      try {
+        const jsonMatch = text.match(/\{[\s\S]*\}/)
+        if (jsonMatch) {
+          return JSON.parse(jsonMatch[0])
+        }
+      } catch (parseError) {
+        logger.warn('No se pudo parsear respuesta JSON inicial, devolviendo texto plano')
+      }
+      
+      return {
+        resumen: text,
+        impacto: [],
+        recomendaciones: [],
+        urgencia: 'Bajo',
+        insights: text
+      }
+    } catch (error) {
+      logger.error('Error al analizar estructura inicial:', error)
+      throw error // Re-throw to be handled by caller
+    }
+  }
+
+  /**
    * Analiza los cambios detectados en un competidor (optimizado para tokens)
    */
   async analyzeChanges(changeData) {
@@ -70,33 +145,40 @@ ${s.changes.map(c => `  * ${c.type}: "${c.before}" → "${c.after}"`).join('\n')
       }
 
       const prompt = `
-Eres un analista experto en inteligencia competitiva. Analiza los siguientes cambios detectados en el sitio web de un competidor:
+Eres un Consultor Senior de Estrategia Digital. Tu cliente compite contra esta empresa.
+Se han detectado cambios en su sitio web. Tu trabajo NO es describir el cambio técnico, sino DESCUBRIR LA ESTRATEGIA detrás del cambio.
 
-**Competidor:** ${changeData.competitorName}
-**URL:** ${changeData.url}
-**Fecha del cambio:** ${changeData.date || new Date().toISOString()}
-**Tipo de cambio:** ${changeData.changeType || 'general'}
-**Severidad:** ${changeData.severity || 'medium'}
-**Total de cambios:** ${changeData.totalChanges || 1}
+**Contexto del Cambio:**
+- Competidor: ${changeData.competitorName}
+- URL: ${changeData.url}
+- Tipo de Cambio Detectado: ${changeData.changeType || 'general'}
+- Severidad Técnica: ${changeData.severity || 'medium'}
 
+**Detalles Técnicos (INPUT):**
 ${changesInfo}
-**Secciones modificadas:**
 ${sectionsInfo}
 ${htmlContextInfo}
 
-Por favor, proporciona:
-1. **Resumen ejecutivo** (2-3 líneas): ¿Qué cambió y por qué es importante?
-2. **Impacto en el negocio** (3-4 puntos): ¿Cómo afecta esto a nuestra estrategia?
-3. **Recomendaciones** (2-3 acciones): ¿Qué deberíamos hacer al respecto?
-4. **Nivel de urgencia** (Alto/Medio/Bajo): ¿Qué tan rápido debemos actuar?
+**TU ANÁLISIS (OUTPUT):**
+Analiza estos datos técnicos y tradúcelos a lenguaje de negocios.
+- Si cambiaron precios -> ¿Están iniciando una guerra de precios? ¿Subieron mercado?
+- Si cambiaron el Hero -> ¿Han cambiado su Propuesta de Valor? ¿A qué nuevo segmento apuntan?
+- Si añadieron Features -> ¿Están cerrando una brecha de producto?
+- Si cambiaron botones/CTAs -> ¿Están optimizando conversión agresivamente?
 
-Responde en formato JSON con esta estructura:
+Responde en formato JSON estrictamente:
 {
-  "resumen": "...",
-  "impacto": ["punto 1", "punto 2", "punto 3"],
-  "recomendaciones": ["acción 1", "acción 2"],
-  "urgencia": "Alto|Medio|Bajo",
-  "insights": "Análisis adicional relevante"
+  "resumen": "Titular de impacto. (ej: 'Pivote estratégico hacia clientes Enterprise', 'Aumento de precios encubierto', 'Rediseño total de marca').",
+  "impacto": [
+    "Consecuencia directa 1 (ej: Su nueva oferta deja la nuestra obsoleta en precio)",
+    "Consecuencia directa 2 (ej: Están atacando nuestro nicho principal)"
+  ],
+  "recomendaciones": [
+    "Contramedida inmediata 1",
+    "Contramedida a mediano plazo 2"
+  ],
+  "urgencia": "Alto/Medio/Bajo",
+  "insights": "Deducción profunda (ej: 'Este cambio sugiere que están perdiendo clientes pequeños y buscan subir el ticket promedio')"
 }
 `
 
